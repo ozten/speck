@@ -1,0 +1,19 @@
+[package]
+name = "speck"
+version = "0.1.0"
+edition = "2024"
+description = "Minimal CLI scaffold for planning and verification workflows"
+license = "MIT"
+repository = "https://example.com/speck"
+rust-version = "1.85"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
