@@ -1,0 +1,1 @@
+//! Validation logic and types.

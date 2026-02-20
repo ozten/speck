@@ -16,8 +16,19 @@ pub struct Cli {
 pub enum Command {
     /// Produce a lightweight implementation plan.
     Plan,
-    /// Verify behavior and quality checks.
-    Verify,
+    /// Validate behavior and quality checks.
+    Validate,
+    /// Map dependencies between tasks.
+    Map,
+    /// Show details of a specific item.
+    Show {
+        /// The identifier to show.
+        id: Option<String>,
+    },
+    /// Display current project status.
+    Status,
+    /// List dependency relationships.
+    Deps,
 }
 
 #[cfg(test)]
@@ -32,8 +43,38 @@ mod tests {
     }
 
     #[test]
-    fn parses_verify_subcommand() {
-        let cli = Cli::parse_from(["speck", "verify"]);
-        assert!(matches!(cli.command, Command::Verify));
+    fn parses_validate_subcommand() {
+        let cli = Cli::parse_from(["speck", "validate"]);
+        assert!(matches!(cli.command, Command::Validate));
+    }
+
+    #[test]
+    fn parses_map_subcommand() {
+        let cli = Cli::parse_from(["speck", "map"]);
+        assert!(matches!(cli.command, Command::Map));
+    }
+
+    #[test]
+    fn parses_show_subcommand() {
+        let cli = Cli::parse_from(["speck", "show"]);
+        assert!(matches!(cli.command, Command::Show { id: None }));
+    }
+
+    #[test]
+    fn parses_show_with_id() {
+        let cli = Cli::parse_from(["speck", "show", "task-1"]);
+        assert!(matches!(cli.command, Command::Show { id: Some(_) }));
+    }
+
+    #[test]
+    fn parses_status_subcommand() {
+        let cli = Cli::parse_from(["speck", "status"]);
+        assert!(matches!(cli.command, Command::Status));
+    }
+
+    #[test]
+    fn parses_deps_subcommand() {
+        let cli = Cli::parse_from(["speck", "deps"]);
+        assert!(matches!(cli.command, Command::Deps));
     }
 }

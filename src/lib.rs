@@ -1,7 +1,13 @@
 //! Core library entry for the `speck` CLI.
 
+pub mod adapters;
+pub mod cassette;
 pub mod cli;
 pub mod commands;
+pub mod map;
+pub mod plan;
+pub mod ports;
+pub mod validate;
 
 use clap::Parser;
 
@@ -15,7 +21,15 @@ where
     I: IntoIterator<Item = T>,
     T: Into<std::ffi::OsString> + Clone,
 {
-    let cli = cli::Cli::try_parse_from(args).map_err(|err| err.to_string())?;
+    let cli = match cli::Cli::try_parse_from(args) {
+        Ok(cli) => cli,
+        Err(err) if err.use_stderr() => return Err(err.to_string()),
+        Err(err) => {
+            // --help or --version: print to stdout and succeed.
+            let _ = err.print();
+            return Ok(());
+        }
+    };
     commands::dispatch(&cli.command)
 }
 

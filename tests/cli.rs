@@ -12,15 +12,47 @@ fn plan_subcommand_prints_stub_message() {
     let output = run_speck(&["plan"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success());
-    assert!(stdout.contains("[stub] speck plan"));
+    assert!(stdout.contains("not yet implemented"));
 }
 
 #[test]
-fn verify_subcommand_prints_stub_message() {
-    let output = run_speck(&["verify"]);
+fn validate_subcommand_prints_stub_message() {
+    let output = run_speck(&["validate"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success());
-    assert!(stdout.contains("[stub] speck verify"));
+    assert!(stdout.contains("not yet implemented"));
+}
+
+#[test]
+fn map_subcommand_prints_stub_message() {
+    let output = run_speck(&["map"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success());
+    assert!(stdout.contains("not yet implemented"));
+}
+
+#[test]
+fn show_subcommand_prints_stub_message() {
+    let output = run_speck(&["show"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success());
+    assert!(stdout.contains("not yet implemented"));
+}
+
+#[test]
+fn status_subcommand_prints_stub_message() {
+    let output = run_speck(&["status"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success());
+    assert!(stdout.contains("not yet implemented"));
+}
+
+#[test]
+fn deps_subcommand_prints_stub_message() {
+    let output = run_speck(&["deps"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success());
+    assert!(stdout.contains("not yet implemented"));
 }
 
 #[test]

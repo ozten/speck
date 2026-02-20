@@ -1,7 +1,11 @@
 //! Command dispatch and handlers.
 
+pub mod deps;
+pub mod map;
 pub mod plan;
-pub mod verify;
+pub mod show;
+pub mod status;
+pub mod validate;
 
 use crate::cli::Command;
 
@@ -13,6 +17,10 @@ use crate::cli::Command;
 pub fn dispatch(command: &Command) -> Result<(), String> {
     match command {
         Command::Plan => plan::run(),
-        Command::Verify => verify::run(),
+        Command::Validate => validate::run(),
+        Command::Map => map::run(),
+        Command::Show { id } => show::run(id.as_deref()),
+        Command::Status => status::run(),
+        Command::Deps => deps::run(),
     }
 }
