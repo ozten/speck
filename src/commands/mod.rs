@@ -19,7 +19,7 @@ pub fn dispatch(command: &Command) -> Result<(), String> {
     match command {
         Command::Plan => plan::run(),
         Command::Validate { spec_id, all } => validate::run(spec_id.as_deref(), *all),
-        Command::Map => map::run(),
+        Command::Map { diff } => map::run(*diff),
         Command::Show { id } => show::run(id.as_deref()),
         Command::Status => status::run(),
         Command::Deps => deps::run(),

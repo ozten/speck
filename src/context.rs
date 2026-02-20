@@ -40,19 +40,20 @@ pub struct ServiceContext {
 }
 
 impl ServiceContext {
-    /// Creates a live context with real filesystem and shell adapters.
+    /// Creates a live context with real adapters for filesystem, shell, clock, and git.
     ///
-    /// Only the filesystem and shell ports use live adapters; other ports
-    /// use panicking stubs and will fail if accessed.
+    /// Remaining ports (`id_gen`, llm, issues) use panicking stubs.
     #[must_use]
     pub fn live() -> Self {
+        use crate::adapters::live::clock::LiveClock;
         use crate::adapters::live::filesystem::LiveFileSystem;
+        use crate::adapters::live::git::LiveGitRepo;
         use crate::adapters::live::shell::LiveShellExecutor;
 
         Self {
-            clock: Box::new(PanickingClock),
+            clock: Box::new(LiveClock),
             fs: Box::new(LiveFileSystem),
-            git: Box::new(PanickingGitRepo),
+            git: Box::new(LiveGitRepo),
             shell: Box::new(LiveShellExecutor),
             id_gen: Box::new(PanickingIdGenerator),
             llm: Box::new(PanickingLlmClient),
@@ -68,13 +69,15 @@ impl ServiceContext {
     /// for capturing cassettes via the `SPECK_RECORD` env var.
     #[must_use]
     pub fn recording(path: &Path) -> Self {
+        use crate::adapters::live::clock::LiveClock;
         use crate::adapters::live::filesystem::LiveFileSystem;
+        use crate::adapters::live::git::LiveGitRepo;
         use crate::adapters::live::shell::LiveShellExecutor;
 
         Self {
-            clock: Box::new(PanickingClock),
+            clock: Box::new(LiveClock),
             fs: Box::new(LiveFileSystem),
-            git: Box::new(PanickingGitRepo),
+            git: Box::new(LiveGitRepo),
             shell: Box::new(LiveShellExecutor),
             id_gen: Box::new(PanickingIdGenerator),
             llm: Box::new(PanickingLlmClient),

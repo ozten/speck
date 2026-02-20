@@ -25,7 +25,11 @@ pub enum Command {
         all: bool,
     },
     /// Map dependencies between tasks.
-    Map,
+    Map {
+        /// Show what changed since the last map.
+        #[arg(long)]
+        diff: bool,
+    },
     /// Show details of a specific item.
     Show {
         /// The identifier to show.
@@ -77,7 +81,13 @@ mod tests {
     #[test]
     fn parses_map_subcommand() {
         let cli = Cli::parse_from(["speck", "map"]);
-        assert!(matches!(cli.command, Command::Map));
+        assert!(matches!(cli.command, Command::Map { diff: false }));
+    }
+
+    #[test]
+    fn parses_map_diff() {
+        let cli = Cli::parse_from(["speck", "map", "--diff"]);
+        assert!(matches!(cli.command, Command::Map { diff: true }));
     }
 
     #[test]

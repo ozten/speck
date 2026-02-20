@@ -33,11 +33,19 @@ fn validate_help_shows_usage() {
 }
 
 #[test]
-fn map_subcommand_prints_stub_message() {
+fn map_subcommand_generates_map() {
     let output = run_speck(&["map"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(stdout.contains("Map generated:"));
+}
+
+#[test]
+fn map_help_shows_diff_flag() {
+    let output = run_speck(&["map", "--help"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success());
-    assert!(stdout.contains("not yet implemented"));
+    assert!(stdout.contains("--diff"));
 }
 
 #[test]

@@ -1,5 +1,6 @@
 //! Codebase map generation: structural snapshot of a target project.
 
+pub mod diff;
 pub mod generator;
 
 use chrono::{DateTime, Utc};
