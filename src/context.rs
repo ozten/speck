@@ -37,6 +37,26 @@ pub struct ServiceContext {
 }
 
 impl ServiceContext {
+    /// Creates a live context with real filesystem and shell adapters.
+    ///
+    /// Only the filesystem and shell ports use live adapters; other ports
+    /// use panicking stubs and will fail if accessed.
+    #[must_use]
+    pub fn live() -> Self {
+        use crate::adapters::live::filesystem::LiveFileSystem;
+        use crate::adapters::live::shell::LiveShellExecutor;
+
+        Self {
+            clock: Box::new(PanickingClock),
+            fs: Box::new(LiveFileSystem),
+            git: Box::new(PanickingGitRepo),
+            shell: Box::new(LiveShellExecutor),
+            id_gen: Box::new(PanickingIdGenerator),
+            llm: Box::new(PanickingLlmClient),
+            issues: Box::new(PanickingIssueTracker),
+        }
+    }
+
     /// Creates a replaying context from a monolithic cassette file.
     ///
     /// All ports are served by a single cassette — each port/method pair

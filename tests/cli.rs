@@ -16,11 +16,20 @@ fn plan_subcommand_prints_stub_message() {
 }
 
 #[test]
-fn validate_subcommand_prints_stub_message() {
+fn validate_without_args_shows_error() {
     let output = run_speck(&["validate"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(stderr.contains("SPEC_ID") || stderr.contains("--all"));
+}
+
+#[test]
+fn validate_help_shows_usage() {
+    let output = run_speck(&["validate", "--help"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success());
-    assert!(stdout.contains("not yet implemented"));
+    assert!(stdout.contains("spec-id") || stdout.contains("SPEC_ID") || stdout.contains("spec_id"));
+    assert!(stdout.contains("--all"));
 }
 
 #[test]
