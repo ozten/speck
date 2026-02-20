@@ -17,7 +17,13 @@ pub enum Command {
     /// Produce a lightweight implementation plan.
     Plan,
     /// Validate behavior and quality checks.
-    Validate,
+    Validate {
+        /// The spec ID to validate (e.g., "IMPACT-42").
+        spec_id: Option<String>,
+        /// Validate all task specs in the store.
+        #[arg(long)]
+        all: bool,
+    },
     /// Map dependencies between tasks.
     Map,
     /// Show details of a specific item.
@@ -44,8 +50,14 @@ mod tests {
 
     #[test]
     fn parses_validate_subcommand() {
-        let cli = Cli::parse_from(["speck", "validate"]);
-        assert!(matches!(cli.command, Command::Validate));
+        let cli = Cli::parse_from(["speck", "validate", "--all"]);
+        assert!(matches!(cli.command, Command::Validate { all: true, .. }));
+    }
+
+    #[test]
+    fn parses_validate_with_spec_id() {
+        let cli = Cli::parse_from(["speck", "validate", "IMPACT-42"]);
+        assert!(matches!(cli.command, Command::Validate { spec_id: Some(_), all: false }));
     }
 
     #[test]
