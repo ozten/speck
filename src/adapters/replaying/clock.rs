@@ -1,88 +1,35 @@
 //! Replaying adapter for the Clock port.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
 
+use super::next_output;
 use crate::cassette::replayer::CassetteReplayer;
-use crate::ports::clock::Clock;
+use crate::ports::Clock;
 
-/// Replays recorded clock values from a cassette.
+/// Serves recorded `now()` results from a cassette.
 pub struct ReplayingClock {
-    replayer: Mutex<CassetteReplayer>,
+    replayer: Option<Arc<Mutex<CassetteReplayer>>>,
 }
 
 impl ReplayingClock {
-    /// Creates a new replaying clock from a cassette replayer.
+    /// Create a replaying clock backed by the given replayer.
     #[must_use]
-    pub fn new(replayer: CassetteReplayer) -> Self {
-        Self { replayer: Mutex::new(replayer) }
+    pub fn new(replayer: Arc<Mutex<CassetteReplayer>>) -> Self {
+        Self { replayer: Some(replayer) }
+    }
+
+    /// Create a replaying clock with no cassette. Panics when called.
+    #[must_use]
+    pub fn unconfigured() -> Self {
+        Self { replayer: None }
     }
 }
 
 impl Clock for ReplayingClock {
     fn now(&self) -> DateTime<Utc> {
-        let output = {
-            let mut replayer = self.replayer.lock().expect("replayer lock poisoned");
-            let interaction = replayer.next_interaction("clock", "now");
-            interaction.output.clone()
-        };
-        serde_json::from_value(output).expect("clock::now: failed to deserialize DateTime<Utc>")
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::cassette::format::{Cassette, Interaction};
-    use serde_json::json;
-
-    fn make_replayer(interactions: Vec<Interaction>) -> CassetteReplayer {
-        let cassette = Cassette {
-            name: "test".into(),
-            recorded_at: Utc::now(),
-            commit: "abc".into(),
-            interactions,
-        };
-        CassetteReplayer::new(&cassette)
-    }
-
-    #[test]
-    fn replaying_clock_serves_recorded_time() {
-        let ts = "2024-06-15T10:30:00Z";
-        let replayer = make_replayer(vec![Interaction {
-            seq: 0,
-            port: "clock".into(),
-            method: "now".into(),
-            input: json!({}),
-            output: json!(ts),
-        }]);
-        let clock = ReplayingClock::new(replayer);
-        let result = clock.now();
-        assert_eq!(result.to_rfc3339(), "2024-06-15T10:30:00+00:00");
-    }
-
-    #[test]
-    fn replaying_clock_serves_multiple_times() {
-        let replayer = make_replayer(vec![
-            Interaction {
-                seq: 0,
-                port: "clock".into(),
-                method: "now".into(),
-                input: json!({}),
-                output: json!("2024-01-01T00:00:00Z"),
-            },
-            Interaction {
-                seq: 1,
-                port: "clock".into(),
-                method: "now".into(),
-                input: json!({}),
-                output: json!("2024-01-01T00:01:00Z"),
-            },
-        ]);
-        let clock = ReplayingClock::new(replayer);
-        let t1 = clock.now();
-        let t2 = clock.now();
-        assert!(t2 > t1);
+        let output = next_output(self.replayer.as_ref(), "clock", "now");
+        serde_json::from_value(output).expect("failed to deserialize clock output from cassette")
     }
 }

@@ -15,6 +15,9 @@ serde_json = "1"
 serde_yaml = "0.9"
 tokio = { version = "1", features = ["macros", "rt"] }
 
+[dev-dependencies]
+tokio = { version = "1.49.0", features = ["macros", "rt"] }
+
 [lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"
@@ -22,5 +25,3 @@ missing_docs = "warn"
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
 module_name_repetitions = "allow"
-
-[dev-dependencies]

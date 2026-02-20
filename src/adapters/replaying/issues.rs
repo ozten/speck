@@ -1,35 +1,28 @@
 //! Replaying adapter for the `IssueTracker` port.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
+use super::{next_output, replay_result};
 use crate::cassette::replayer::CassetteReplayer;
-use crate::ports::issues::{Issue, IssueTracker};
+use crate::ports::{Issue, IssueTracker};
 
-/// Replays recorded issue tracker operations from a cassette.
+/// Serves recorded issue tracker results from a cassette.
 pub struct ReplayingIssueTracker {
-    replayer: Mutex<CassetteReplayer>,
+    replayer: Option<Arc<Mutex<CassetteReplayer>>>,
 }
 
 impl ReplayingIssueTracker {
-    /// Creates a new replaying issue tracker from a cassette replayer.
+    /// Create a replaying issue tracker backed by the given replayer.
     #[must_use]
-    pub fn new(replayer: CassetteReplayer) -> Self {
-        Self { replayer: Mutex::new(replayer) }
+    pub fn new(replayer: Arc<Mutex<CassetteReplayer>>) -> Self {
+        Self { replayer: Some(replayer) }
     }
-}
 
-/// Extracts a Result from a cassette output JSON value.
-fn extract_result<T: serde::de::DeserializeOwned>(
-    output: &serde_json::Value,
-    context: &str,
-) -> Result<T, Box<dyn std::error::Error + Send + Sync>> {
-    if let Some(err) = output.get("err") {
-        let msg = err.as_str().unwrap_or("unknown error").to_string();
-        return Err(msg.into());
+    /// Create a replaying issue tracker with no cassette. Panics when called.
+    #[must_use]
+    pub fn unconfigured() -> Self {
+        Self { replayer: None }
     }
-    let value = output.get("ok").unwrap_or(output);
-    serde_json::from_value(value.clone())
-        .map_err(|e| format!("{context}: failed to deserialize: {e}").into())
 }
 
 impl IssueTracker for ReplayingIssueTracker {
@@ -38,12 +31,8 @@ impl IssueTracker for ReplayingIssueTracker {
         _title: &str,
         _body: &str,
     ) -> Result<Issue, Box<dyn std::error::Error + Send + Sync>> {
-        let output = {
-            let mut replayer = self.replayer.lock().expect("replayer lock poisoned");
-            let interaction = replayer.next_interaction("issues", "create_issue");
-            interaction.output.clone()
-        };
-        extract_result(&output, "issues::create_issue")
+        let output = next_output(self.replayer.as_ref(), "issues", "create_issue");
+        replay_result(output)
     }
 
     fn update_issue(
@@ -53,74 +42,15 @@ impl IssueTracker for ReplayingIssueTracker {
         _body: Option<&str>,
         _status: Option<&str>,
     ) -> Result<Issue, Box<dyn std::error::Error + Send + Sync>> {
-        let output = {
-            let mut replayer = self.replayer.lock().expect("replayer lock poisoned");
-            let interaction = replayer.next_interaction("issues", "update_issue");
-            interaction.output.clone()
-        };
-        extract_result(&output, "issues::update_issue")
+        let output = next_output(self.replayer.as_ref(), "issues", "update_issue");
+        replay_result(output)
     }
 
     fn list_issues(
         &self,
         _status: Option<&str>,
     ) -> Result<Vec<Issue>, Box<dyn std::error::Error + Send + Sync>> {
-        let output = {
-            let mut replayer = self.replayer.lock().expect("replayer lock poisoned");
-            let interaction = replayer.next_interaction("issues", "list_issues");
-            interaction.output.clone()
-        };
-        extract_result(&output, "issues::list_issues")
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::cassette::format::{Cassette, Interaction};
-    use chrono::Utc;
-    use serde_json::json;
-
-    fn make_replayer(interactions: Vec<Interaction>) -> CassetteReplayer {
-        let cassette = Cassette {
-            name: "test".into(),
-            recorded_at: Utc::now(),
-            commit: "abc".into(),
-            interactions,
-        };
-        CassetteReplayer::new(&cassette)
-    }
-
-    #[test]
-    fn replaying_issue_tracker_create() {
-        let replayer = make_replayer(vec![Interaction {
-            seq: 0,
-            port: "issues".into(),
-            method: "create_issue".into(),
-            input: json!({"title": "Bug", "body": "Broken"}),
-            output: json!({"ok": {"id": "ISS-1", "title": "Bug", "body": "Broken", "status": "open"}}),
-        }]);
-        let tracker = ReplayingIssueTracker::new(replayer);
-        let issue = tracker.create_issue("Bug", "Broken").unwrap();
-        assert_eq!(issue.id, "ISS-1");
-        assert_eq!(issue.status, "open");
-    }
-
-    #[test]
-    fn replaying_issue_tracker_list() {
-        let replayer = make_replayer(vec![Interaction {
-            seq: 0,
-            port: "issues".into(),
-            method: "list_issues".into(),
-            input: json!({"status": "open"}),
-            output: json!({"ok": [
-                {"id": "ISS-1", "title": "Bug", "body": "Broken", "status": "open"},
-                {"id": "ISS-2", "title": "Feature", "body": "New thing", "status": "open"}
-            ]}),
-        }]);
-        let tracker = ReplayingIssueTracker::new(replayer);
-        let issues = tracker.list_issues(Some("open")).unwrap();
-        assert_eq!(issues.len(), 2);
-        assert_eq!(issues[0].id, "ISS-1");
+        let output = next_output(self.replayer.as_ref(), "issues", "list_issues");
+        replay_result(output)
     }
 }

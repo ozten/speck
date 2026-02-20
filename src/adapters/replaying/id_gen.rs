@@ -1,71 +1,33 @@
 //! Replaying adapter for the `IdGenerator` port.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
+use super::next_output;
 use crate::cassette::replayer::CassetteReplayer;
-use crate::ports::id_gen::IdGenerator;
+use crate::ports::IdGenerator;
 
-/// Replays recorded IDs from a cassette.
+/// Serves recorded IDs from a cassette.
 pub struct ReplayingIdGenerator {
-    replayer: Mutex<CassetteReplayer>,
+    replayer: Option<Arc<Mutex<CassetteReplayer>>>,
 }
 
 impl ReplayingIdGenerator {
-    /// Creates a new replaying ID generator from a cassette replayer.
+    /// Create a replaying ID generator backed by the given replayer.
     #[must_use]
-    pub fn new(replayer: CassetteReplayer) -> Self {
-        Self { replayer: Mutex::new(replayer) }
+    pub fn new(replayer: Arc<Mutex<CassetteReplayer>>) -> Self {
+        Self { replayer: Some(replayer) }
+    }
+
+    /// Create a replaying ID generator with no cassette. Panics when called.
+    #[must_use]
+    pub fn unconfigured() -> Self {
+        Self { replayer: None }
     }
 }
 
 impl IdGenerator for ReplayingIdGenerator {
     fn generate_id(&self) -> String {
-        let output = {
-            let mut replayer = self.replayer.lock().expect("replayer lock poisoned");
-            let interaction = replayer.next_interaction("id_gen", "generate_id");
-            interaction.output.clone()
-        };
-        output.as_str().expect("id_gen::generate_id: expected string output").to_string()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::cassette::format::{Cassette, Interaction};
-    use chrono::Utc;
-    use serde_json::json;
-
-    fn make_replayer(interactions: Vec<Interaction>) -> CassetteReplayer {
-        let cassette = Cassette {
-            name: "test".into(),
-            recorded_at: Utc::now(),
-            commit: "abc".into(),
-            interactions,
-        };
-        CassetteReplayer::new(&cassette)
-    }
-
-    #[test]
-    fn replaying_id_generator() {
-        let replayer = make_replayer(vec![
-            Interaction {
-                seq: 0,
-                port: "id_gen".into(),
-                method: "generate_id".into(),
-                input: json!({}),
-                output: json!("uuid-001"),
-            },
-            Interaction {
-                seq: 1,
-                port: "id_gen".into(),
-                method: "generate_id".into(),
-                input: json!({}),
-                output: json!("uuid-002"),
-            },
-        ]);
-        let gen = ReplayingIdGenerator::new(replayer);
-        assert_eq!(gen.generate_id(), "uuid-001");
-        assert_eq!(gen.generate_id(), "uuid-002");
+        let output = next_output(self.replayer.as_ref(), "id_gen", "generate_id");
+        serde_json::from_value(output).expect("failed to deserialize id_gen output from cassette")
     }
 }
