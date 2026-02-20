@@ -7,6 +7,7 @@ use crate::adapters::replaying::{
     ReplayingIssueTracker, ReplayingLlmClient, ReplayingShellExecutor,
 };
 use crate::cassette::config::CassetteConfig;
+use crate::cassette::recorder::CassetteRecorder;
 use crate::ports::clock::Clock;
 use crate::ports::filesystem::FileSystem;
 use crate::ports::git::GitRepo;
@@ -34,6 +35,8 @@ pub struct ServiceContext {
     pub llm: Box<dyn LlmClient>,
     /// Issue tracker for managing work items.
     pub issues: Box<dyn IssueTracker>,
+    /// Optional cassette recorder; written to disk on drop.
+    recorder: Option<CassetteRecorder>,
 }
 
 impl ServiceContext {
@@ -54,6 +57,29 @@ impl ServiceContext {
             id_gen: Box::new(PanickingIdGenerator),
             llm: Box::new(PanickingLlmClient),
             issues: Box::new(PanickingIssueTracker),
+            recorder: None,
+        }
+    }
+
+    /// Creates a recording context that writes a cassette file on drop.
+    ///
+    /// Uses live adapters for actual work. The cassette is written to `path`
+    /// when this context is dropped. This is the developer-only mechanism
+    /// for capturing cassettes via the `SPECK_RECORD` env var.
+    #[must_use]
+    pub fn recording(path: &Path) -> Self {
+        use crate::adapters::live::filesystem::LiveFileSystem;
+        use crate::adapters::live::shell::LiveShellExecutor;
+
+        Self {
+            clock: Box::new(PanickingClock),
+            fs: Box::new(LiveFileSystem),
+            git: Box::new(PanickingGitRepo),
+            shell: Box::new(LiveShellExecutor),
+            id_gen: Box::new(PanickingIdGenerator),
+            llm: Box::new(PanickingLlmClient),
+            issues: Box::new(PanickingIssueTracker),
+            recorder: Some(CassetteRecorder::new(path, "speck-session", "unknown")),
         }
     }
 
@@ -95,6 +121,7 @@ impl ServiceContext {
             issues: Box::new(ReplayingIssueTracker::new(
                 crate::cassette::replayer::CassetteReplayer::new(&cassette),
             )),
+            recorder: None,
         })
     }
 
@@ -139,7 +166,18 @@ impl ServiceContext {
                 Some(r) => Box::new(ReplayingIssueTracker::new(r)),
                 None => Box::new(PanickingIssueTracker),
             },
+            recorder: None,
         })
+    }
+}
+
+impl Drop for ServiceContext {
+    fn drop(&mut self) {
+        if let Some(recorder) = self.recorder.take() {
+            if let Err(e) = recorder.finish() {
+                eprintln!("Warning: failed to write cassette: {e}");
+            }
+        }
     }
 }
 
