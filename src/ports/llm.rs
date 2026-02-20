@@ -1,6 +1,15 @@
 //! LLM client port for language-model completions.
 
+use std::error::Error;
+use std::future::Future;
+use std::pin::Pin;
+
 use serde::{Deserialize, Serialize};
+
+/// Boxed future type alias used by [`LlmClient`] to keep the trait dyn-compatible.
+pub type LlmFuture<'a> = Pin<
+    Box<dyn Future<Output = Result<CompletionResponse, Box<dyn Error + Send + Sync>>> + Send + 'a>,
+>;
 
 /// A request to generate a completion from an LLM.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,10 +40,5 @@ pub trait LlmClient: Send + Sync {
     /// # Errors
     ///
     /// Returns an error if the request fails (network, auth, rate-limit, etc.).
-    fn complete(
-        &self,
-        request: &CompletionRequest,
-    ) -> impl std::future::Future<
-        Output = Result<CompletionResponse, Box<dyn std::error::Error + Send + Sync>>,
-    > + Send;
+    fn complete(&self, request: &CompletionRequest) -> LlmFuture<'_>;
 }
