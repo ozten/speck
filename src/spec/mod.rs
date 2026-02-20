@@ -10,5 +10,5 @@ mod verification;
 
 pub use check::VerificationCheck;
 pub use signal::SignalType;
-pub use task_spec::TaskSpec;
+pub use task_spec::{TaskContext, TaskSpec};
 pub use verification::VerificationStrategy;

@@ -5,6 +5,7 @@ pub mod map;
 pub mod plan;
 pub mod show;
 pub mod status;
+pub mod sync;
 pub mod validate;
 
 use crate::cli::Command;
@@ -22,5 +23,6 @@ pub fn dispatch(command: &Command) -> Result<(), String> {
         Command::Show { id } => show::run(id.as_deref()),
         Command::Status => status::run(),
         Command::Deps => deps::run(),
+        Command::Sync { target, dry_run } => sync::run(target, *dry_run),
     }
 }
