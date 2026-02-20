@@ -41,27 +41,27 @@ fn map_subcommand_prints_stub_message() {
 }
 
 #[test]
-fn show_subcommand_prints_stub_message() {
+fn show_subcommand_empty_store() {
     let output = run_speck(&["show"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success());
-    assert!(stdout.contains("not yet implemented"));
+    assert!(stdout.contains("No specs found") || stdout.contains("Available specs"));
 }
 
 #[test]
-fn status_subcommand_prints_stub_message() {
+fn status_subcommand_empty_store() {
     let output = run_speck(&["status"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success());
-    assert!(stdout.contains("not yet implemented"));
+    assert!(stdout.contains("No specs found") || stdout.contains("ID"));
 }
 
 #[test]
-fn deps_subcommand_prints_stub_message() {
+fn deps_subcommand_empty_store() {
     let output = run_speck(&["deps"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success());
-    assert!(stdout.contains("not yet implemented"));
+    assert!(stdout.contains("No specs found") || stdout.contains("Dependency Graph"));
 }
 
 #[test]
