@@ -4,6 +4,8 @@
 //! a per-check pass/fail report.
 
 use crate::context::ServiceContext;
+use crate::linkage;
+use crate::map::CodebaseMap;
 use crate::spec::{TaskSpec, VerificationCheck, VerificationStrategy};
 
 /// Result of a single verification check.
@@ -109,6 +111,61 @@ fn run_shell_check(ctx: &ServiceContext, name: &str, command: &str, expected: &s
             detail: format!("failed to run command: {e}"),
         },
     }
+}
+
+/// Validates a task spec and includes drift warnings if codebase maps are provided.
+///
+/// When `old_map` and `new_map` are both `Some`, runs drift detection before
+/// validation and prepends any drift warnings as check results.
+#[must_use]
+pub fn validate_with_drift(
+    ctx: &ServiceContext,
+    spec: &TaskSpec,
+    old_map: Option<&CodebaseMap>,
+    new_map: Option<&CodebaseMap>,
+) -> ValidationResult {
+    let mut result = validate(ctx, spec);
+
+    if let (Some(old), Some(new)) = (old_map, new_map) {
+        let drift_report = linkage::detect_drift(std::slice::from_ref(spec), old, new);
+        if !drift_report.is_clean() {
+            for entry in &drift_report.entries {
+                for path in &entry.changed_modules {
+                    result.checks.insert(
+                        0,
+                        CheckResult {
+                            name: format!("drift-warning: {path}"),
+                            passed: false,
+                            detail: "Module has changed since spec was written".to_string(),
+                        },
+                    );
+                }
+                for path in &entry.removed_modules {
+                    result.checks.insert(
+                        0,
+                        CheckResult {
+                            name: format!("drift-warning: {path}"),
+                            passed: false,
+                            detail: "Module has been removed from the codebase".to_string(),
+                        },
+                    );
+                }
+                if entry.replan_recommended {
+                    result.checks.insert(
+                        0,
+                        CheckResult {
+                            name: "drift-warning: re-plan recommended".to_string(),
+                            passed: false,
+                            detail: "Significant drift detected; re-planning is recommended"
+                                .to_string(),
+                        },
+                    );
+                }
+            }
+        }
+    }
+
+    result
 }
 
 /// Formats a `ValidationResult` as a human-readable report.
