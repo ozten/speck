@@ -23,4 +23,8 @@ missing_docs = "warn"
 pedantic = { level = "warn", priority = -1 }
 module_name_repetitions = "allow"
 
+[[bin]]
+name = "cassette_split"
+path = "src/bin/cassette_split.rs"
+
 [dev-dependencies]

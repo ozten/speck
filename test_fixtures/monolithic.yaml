@@ -1,0 +1,31 @@
+name: demo-session
+recorded_at: '2026-01-15T10:30:00Z'
+commit: deadbeef
+interactions:
+- seq: 0
+  port: llm
+  method: complete
+  input:
+    prompt: hello
+  output:
+    text: world
+- seq: 1
+  port: fs
+  method: read
+  input:
+    path: /tmp/test
+  output:
+    content: data
+- seq: 2
+  port: llm
+  method: complete
+  input:
+    prompt: second
+  output:
+    text: response
+- seq: 3
+  port: git
+  method: status
+  input: {}
+  output:
+    clean: true
