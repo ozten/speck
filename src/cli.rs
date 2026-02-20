@@ -35,6 +35,14 @@ pub enum Command {
     Status,
     /// List dependency relationships.
     Deps,
+    /// Sync specs to an external tracker.
+    Sync {
+        /// The sync target (e.g., "beads").
+        target: String,
+        /// Show what would happen without making changes.
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[cfg(test)]
@@ -94,5 +102,23 @@ mod tests {
     fn parses_deps_subcommand() {
         let cli = Cli::parse_from(["speck", "deps"]);
         assert!(matches!(cli.command, Command::Deps));
+    }
+
+    #[test]
+    fn parses_sync_subcommand() {
+        let cli = Cli::parse_from(["speck", "sync", "beads"]);
+        assert!(matches!(
+            cli.command,
+            Command::Sync { ref target, dry_run: false } if target == "beads"
+        ));
+    }
+
+    #[test]
+    fn parses_sync_dry_run() {
+        let cli = Cli::parse_from(["speck", "sync", "beads", "--dry-run"]);
+        assert!(matches!(
+            cli.command,
+            Command::Sync { ref target, dry_run: true } if target == "beads"
+        ));
     }
 }

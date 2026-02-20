@@ -10,6 +10,7 @@ pub mod plan;
 pub mod ports;
 pub mod spec;
 pub mod store;
+pub mod sync;
 pub mod validate;
 
 use clap::Parser;
