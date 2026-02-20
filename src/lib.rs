@@ -8,6 +8,8 @@ pub mod context;
 pub mod map;
 pub mod plan;
 pub mod ports;
+pub mod spec;
+pub mod store;
 pub mod validate;
 
 use clap::Parser;
