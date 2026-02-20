@@ -17,5 +17,5 @@ pub use filesystem::FileSystem;
 pub use git::GitRepo;
 pub use id_gen::IdGenerator;
 pub use issues::{Issue, IssueTracker};
-pub use llm::{CompletionRequest, CompletionResponse, LlmClient};
+pub use llm::{CompletionFuture, CompletionRequest, CompletionResponse, LlmClient};
 pub use shell::{ShellExecutor, ShellOutput};

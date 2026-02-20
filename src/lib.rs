@@ -4,6 +4,7 @@ pub mod adapters;
 pub mod cassette;
 pub mod cli;
 pub mod commands;
+pub mod context;
 pub mod map;
 pub mod plan;
 pub mod ports;

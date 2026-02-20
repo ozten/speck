@@ -24,6 +24,16 @@ pub struct CompletionResponse {
     pub completion_tokens: u32,
 }
 
+/// Boxed future type returned by [`LlmClient::complete`].
+pub type CompletionFuture<'a> = std::pin::Pin<
+    Box<
+        dyn std::future::Future<
+                Output = Result<CompletionResponse, Box<dyn std::error::Error + Send + Sync>>,
+            > + Send
+            + 'a,
+    >,
+>;
+
 /// Sends completion requests to a language model.
 pub trait LlmClient: Send + Sync {
     /// Generates a completion for the given request.
@@ -31,10 +41,5 @@ pub trait LlmClient: Send + Sync {
     /// # Errors
     ///
     /// Returns an error if the request fails (network, auth, rate-limit, etc.).
-    fn complete(
-        &self,
-        request: &CompletionRequest,
-    ) -> impl std::future::Future<
-        Output = Result<CompletionResponse, Box<dyn std::error::Error + Send + Sync>>,
-    > + Send;
+    fn complete(&self, request: &CompletionRequest) -> CompletionFuture<'_>;
 }
