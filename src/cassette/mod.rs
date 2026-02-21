@@ -4,3 +4,4 @@ pub mod config;
 pub mod format;
 pub mod recorder;
 pub mod replayer;
+pub mod session;

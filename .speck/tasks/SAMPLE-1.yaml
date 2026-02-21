@@ -1,0 +1,11 @@
+id: SAMPLE-1
+title: Verify cargo tests pass
+acceptance_criteria:
+  - All unit tests pass
+signal_type: clear
+verification:
+  strategy: direct_assertion
+  checks:
+    - type: command_output
+      command: "cargo test --quiet"
+      expected: "test result: ok"

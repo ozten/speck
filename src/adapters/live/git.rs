@@ -29,14 +29,55 @@ impl GitRepo for LiveGitRepo {
 
     fn list_files(
         &self,
-        _path: &Path,
+        path: &Path,
     ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-        let output = Command::new("git").args(["ls-files"]).output()?;
+        let path_str = path.to_string_lossy();
+        let output = Command::new("git")
+            .args(["ls-files", &path_str])
+            .output()?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(format!("git ls-files failed: {stderr}").into());
         }
-        let files = String::from_utf8_lossy(&output.stdout).lines().map(String::from).collect();
+        let files = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .collect();
         Ok(files)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gets_current_commit() {
+        let git = LiveGitRepo;
+        let result = git.current_commit();
+
+        assert!(result.is_ok());
+        let hash = result.unwrap();
+        assert_eq!(hash.len(), 40);
+    }
+
+    #[test]
+    fn gets_diff() {
+        let git = LiveGitRepo;
+        let result = git.diff();
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn lists_files() {
+        let git = LiveGitRepo;
+        let result = git.list_files(Path::new("src"));
+
+        assert!(result.is_ok());
+        let files = result.unwrap();
+        assert!(!files.is_empty());
+        assert!(files.iter().any(|f| f.contains("main.rs") || f.contains("lib.rs")));
     }
 }

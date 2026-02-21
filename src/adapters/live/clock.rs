@@ -12,3 +12,19 @@ impl Clock for LiveClock {
         Utc::now()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn returns_current_time() {
+        let clock = LiveClock;
+        let before = Utc::now();
+        let now = clock.now();
+        let after = Utc::now();
+
+        assert!(now >= before);
+        assert!(now <= after);
+    }
+}

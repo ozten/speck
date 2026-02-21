@@ -17,3 +17,26 @@ impl ShellExecutor for LiveShellExecutor {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runs_echo_command() {
+        let shell = LiveShellExecutor;
+        let result = shell.run("echo hello").unwrap();
+
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(result.stdout.trim(), "hello");
+        assert!(result.stderr.is_empty());
+    }
+
+    #[test]
+    fn captures_exit_code() {
+        let shell = LiveShellExecutor;
+        let result = shell.run("exit 42").unwrap();
+
+        assert_eq!(result.exit_code, 42);
+    }
+}

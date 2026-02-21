@@ -6,7 +6,7 @@ use crate::context::ServiceContext;
 use crate::store::SpecStore;
 use crate::validate;
 
-/// Execute the `validate` command.
+/// Execute the `validate` command with a provided context.
 ///
 /// When `spec_id` is provided, validates a single spec.
 /// When `--all` is set, validates every spec in the store.
@@ -14,15 +14,15 @@ use crate::validate;
 ///
 /// # Errors
 ///
-/// Returns an error string if spec loading or validation fails.
-pub fn run(spec_id: Option<&str>, all: bool) -> Result<(), String> {
+/// Returns an error string if no spec is specified (and `--all` is not set),
+/// or if loading/validation fails.
+pub fn run_with_context(ctx: &ServiceContext, spec_id: Option<&str>, all: bool) -> Result<(), String> {
     if spec_id.is_none() && !all {
         return Err("Provide a SPEC_ID or use --all to validate all specs".to_string());
     }
 
-    let ctx = ServiceContext::live();
-    let store_root = store_root();
-    let store = SpecStore::new(&ctx, &store_root);
+    let store_root = store_root()?;
+    let store = SpecStore::new(ctx, &store_root);
 
     let mut results = Vec::new();
 
@@ -34,11 +34,11 @@ pub fn run(spec_id: Option<&str>, all: bool) -> Result<(), String> {
         }
         for id in &ids {
             let spec = store.load_task_spec(id)?;
-            results.push(validate::validate(&ctx, &spec));
+            results.push(validate::validate(ctx, &spec));
         }
     } else if let Some(id) = spec_id {
         let spec = store.load_task_spec(id)?;
-        results.push(validate::validate(&ctx, &spec));
+        results.push(validate::validate(ctx, &spec));
     }
 
     let mut any_failed = false;
@@ -56,8 +56,24 @@ pub fn run(spec_id: Option<&str>, all: bool) -> Result<(), String> {
     }
 }
 
-fn store_root() -> PathBuf {
-    std::env::var("SPECK_STORE").map_or_else(|_| PathBuf::from(".speck"), PathBuf::from)
+/// Execute the `validate` command with a default live context.
+///
+/// # Errors
+///
+/// Returns an error string if no spec is specified (and `--all` is not set),
+/// or if loading/validation fails.
+pub fn run(spec_id: Option<&str>, all: bool) -> Result<(), String> {
+    let ctx = ServiceContext::live();
+    run_with_context(&ctx, spec_id, all)
+}
+
+/// Resolve the spec store root directory.
+fn store_root() -> Result<PathBuf, String> {
+    if let Ok(path) = std::env::var("SPECK_STORE") {
+        return Ok(PathBuf::from(path));
+    }
+    let cwd = std::env::current_dir().map_err(|e| format!("Cannot determine cwd: {e}"))?;
+    Ok(cwd.join(".speck"))
 }
 
 #[cfg(test)]
@@ -73,7 +89,6 @@ mod tests {
 
     #[test]
     fn cli_validate_all_empty_store() {
-        // Point store at a non-existent directory — list_task_specs returns empty.
         std::env::set_var("SPECK_STORE", "/tmp/speck_test_empty_store_nonexistent");
         let result = run(None, true);
         std::env::remove_var("SPECK_STORE");

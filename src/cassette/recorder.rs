@@ -7,6 +7,7 @@ use chrono::Utc;
 use super::format::{Cassette, Interaction};
 
 /// Records interactions and writes them as a YAML cassette file.
+#[derive(Debug)]
 pub struct CassetteRecorder {
     path: PathBuf,
     name: String,

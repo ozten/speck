@@ -3,6 +3,20 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+use crate::adapters::live::clock::LiveClock;
+use crate::adapters::live::filesystem::LiveFileSystem;
+use crate::adapters::live::git::LiveGitRepo;
+use crate::adapters::live::id_gen::LiveIdGenerator;
+use crate::adapters::live::issues::LiveIssueTracker;
+use crate::adapters::live::llm::LiveLlmClient;
+use crate::adapters::live::shell::LiveShellExecutor;
+use crate::adapters::recording::clock::RecordingClock;
+use crate::adapters::recording::filesystem::RecordingFileSystem;
+use crate::adapters::recording::git::RecordingGitRepo;
+use crate::adapters::recording::id_gen::RecordingIdGenerator;
+use crate::adapters::recording::issues::RecordingIssueTracker;
+use crate::adapters::recording::llm::RecordingLlmClient;
+use crate::adapters::recording::shell::RecordingShellExecutor;
 use crate::adapters::replaying::clock::ReplayingClock;
 use crate::adapters::replaying::filesystem::ReplayingFileSystem;
 use crate::adapters::replaying::git::ReplayingGitRepo;
@@ -11,14 +25,10 @@ use crate::adapters::replaying::issues::ReplayingIssueTracker;
 use crate::adapters::replaying::llm::ReplayingLlmClient;
 use crate::adapters::replaying::shell::ReplayingShellExecutor;
 use crate::cassette::config::CassetteConfig;
-use crate::cassette::recorder::CassetteRecorder;
-use crate::ports::clock::Clock;
-use crate::ports::filesystem::FileSystem;
-use crate::ports::git::GitRepo;
-use crate::ports::id_gen::IdGenerator;
-use crate::ports::issues::IssueTracker;
-use crate::ports::llm::LlmClient;
-use crate::ports::shell::ShellExecutor;
+use crate::cassette::session::RecordingSession;
+use crate::ports::{
+    Clock, FileSystem, GitRepo, IdGenerator, IssueTracker, LlmClient, ShellExecutor,
+};
 
 /// Bundles all port trait objects into a single context.
 pub struct ServiceContext {
@@ -36,55 +46,69 @@ pub struct ServiceContext {
     pub llm: Box<dyn LlmClient>,
     /// Issue tracker port for managing work items.
     pub issues: Box<dyn IssueTracker>,
-    /// Optional cassette recorder; written to disk on drop.
-    recorder: Option<CassetteRecorder>,
 }
 
 impl ServiceContext {
-    /// Creates a live context with real adapters for filesystem, shell, clock, and git.
-    ///
-    /// Remaining ports (`id_gen`, llm, issues) use panicking stubs.
+    /// Create a live context with real adapters for all ports.
     #[must_use]
     pub fn live() -> Self {
-        use crate::adapters::live::clock::LiveClock;
-        use crate::adapters::live::filesystem::LiveFileSystem;
-        use crate::adapters::live::git::LiveGitRepo;
-        use crate::adapters::live::shell::LiveShellExecutor;
-
         Self {
             clock: Box::new(LiveClock),
             fs: Box::new(LiveFileSystem),
             git: Box::new(LiveGitRepo),
             shell: Box::new(LiveShellExecutor),
-            id_gen: Box::new(ReplayingIdGenerator::unconfigured()),
-            llm: Box::new(ReplayingLlmClient::unconfigured()),
-            issues: Box::new(ReplayingIssueTracker::unconfigured()),
-            recorder: None,
+            id_gen: Box::new(LiveIdGenerator::new()),
+            llm: Box::new(LiveLlmClient::new()),
+            issues: Box::new(LiveIssueTracker),
         }
     }
 
-    /// Creates a recording context that writes a cassette file on drop.
+    /// Create a recording context that wraps live adapters with recorders.
     ///
-    /// Uses live adapters for actual work. The cassette is written to `path`
-    /// when this context is dropped. This is the developer-only mechanism
-    /// for capturing cassettes via the `SPECK_RECORD` env var.
-    #[must_use]
-    pub fn recording(path: &Path) -> Self {
-        use crate::adapters::live::clock::LiveClock;
-        use crate::adapters::live::filesystem::LiveFileSystem;
-        use crate::adapters::live::git::LiveGitRepo;
-        use crate::adapters::live::shell::LiveShellExecutor;
+    /// All interactions are recorded to per-port cassette files in a
+    /// timestamped directory under `.speck/cassettes/`.
+    ///
+    /// Returns both the context and the recording session. The session must
+    /// be finished after the context is dropped to write the cassette files.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the recording session cannot be initialized.
+    pub fn recording() -> Result<(Self, RecordingSession), String> {
+        let session = RecordingSession::new()?;
 
-        Self {
-            clock: Box::new(LiveClock),
-            fs: Box::new(LiveFileSystem),
-            git: Box::new(LiveGitRepo),
-            shell: Box::new(LiveShellExecutor),
-            id_gen: Box::new(ReplayingIdGenerator::unconfigured()),
-            llm: Box::new(ReplayingLlmClient::unconfigured()),
-            issues: Box::new(ReplayingIssueTracker::unconfigured()),
-            recorder: Some(CassetteRecorder::new(path, "speck-session", "unknown")),
-        }
+        let ctx = Self {
+            clock: Box::new(RecordingClock::new(
+                Box::new(LiveClock),
+                Arc::clone(&session.clock),
+            )),
+            fs: Box::new(RecordingFileSystem::new(
+                Box::new(LiveFileSystem),
+                Arc::clone(&session.fs),
+            )),
+            git: Box::new(RecordingGitRepo::new(
+                Box::new(LiveGitRepo),
+                Arc::clone(&session.git),
+            )),
+            shell: Box::new(RecordingShellExecutor::new(
+                Box::new(LiveShellExecutor),
+                Arc::clone(&session.shell),
+            )),
+            id_gen: Box::new(RecordingIdGenerator::new(
+                Box::new(LiveIdGenerator::new()),
+                Arc::clone(&session.id_gen),
+            )),
+            llm: Box::new(RecordingLlmClient::new(
+                Box::new(LiveLlmClient::new()),
+                Arc::clone(&session.llm),
+            )),
+            issues: Box::new(RecordingIssueTracker::new(
+                Box::new(LiveIssueTracker),
+                Arc::clone(&session.issues),
+            )),
+        };
+
+        Ok((ctx, session))
     }
 
     /// Creates a replaying context from a monolithic cassette file.
@@ -105,7 +129,6 @@ impl ServiceContext {
             id_gen: Box::new(ReplayingIdGenerator::new(Arc::clone(&replayer))),
             llm: Box::new(ReplayingLlmClient::new(Arc::clone(&replayer))),
             issues: Box::new(ReplayingIssueTracker::new(replayer)),
-            recorder: None,
         })
     }
 
@@ -151,17 +174,7 @@ impl ServiceContext {
             None => Box::new(ReplayingIssueTracker::unconfigured()),
         };
 
-        Ok(Self { clock, fs, git, shell, id_gen, llm, issues, recorder: None })
-    }
-}
-
-impl Drop for ServiceContext {
-    fn drop(&mut self) {
-        if let Some(recorder) = self.recorder.take() {
-            if let Err(e) = recorder.finish() {
-                eprintln!("Warning: failed to write cassette: {e}");
-            }
-        }
+        Ok(Self { clock, fs, git, shell, id_gen, llm, issues })
     }
 }
 
