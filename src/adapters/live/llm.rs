@@ -5,7 +5,7 @@ use std::env;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
-use crate::ports::llm::{CompletionRequest, CompletionResponse, LlmClient, LlmFuture};
+use crate::ports::llm::{CompletionRequest, CompletionResponse, LlmClient, CompletionFuture};
 
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
@@ -77,7 +77,7 @@ struct AnthropicErrorDetail {
 }
 
 impl LlmClient for LiveLlmClient {
-    fn complete(&self, request: &CompletionRequest) -> LlmFuture<'_> {
+    fn complete(&self, request: &CompletionRequest) -> CompletionFuture<'_> {
         let model = request.model.clone();
         let prompt = request.prompt.clone();
         let max_tokens = request.max_tokens;

@@ -1,11 +1,15 @@
-//! Service context bundling all port trait objects.
+//! Service context that bundles all port trait objects.
 
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
-use crate::adapters::replaying::{
-    ReplayingClock, ReplayingFileSystem, ReplayingGitRepo, ReplayingIdGenerator,
-    ReplayingIssueTracker, ReplayingLlmClient, ReplayingShellExecutor,
-};
+use crate::adapters::replaying::clock::ReplayingClock;
+use crate::adapters::replaying::filesystem::ReplayingFileSystem;
+use crate::adapters::replaying::git::ReplayingGitRepo;
+use crate::adapters::replaying::id_gen::ReplayingIdGenerator;
+use crate::adapters::replaying::issues::ReplayingIssueTracker;
+use crate::adapters::replaying::llm::ReplayingLlmClient;
+use crate::adapters::replaying::shell::ReplayingShellExecutor;
 use crate::cassette::config::CassetteConfig;
 use crate::cassette::recorder::CassetteRecorder;
 use crate::ports::clock::Clock;
@@ -17,23 +21,20 @@ use crate::ports::llm::LlmClient;
 use crate::ports::shell::ShellExecutor;
 
 /// Bundles all port trait objects into a single context.
-///
-/// Each field provides access to one external boundary. Constructors
-/// wire up different adapter implementations (live, replaying, recording).
 pub struct ServiceContext {
-    /// Clock for obtaining the current time.
+    /// Clock port for obtaining the current time.
     pub clock: Box<dyn Clock>,
-    /// Filesystem for file I/O.
+    /// Filesystem port for file I/O operations.
     pub fs: Box<dyn FileSystem>,
-    /// Git repository for version-control queries.
+    /// Git repository port for version-control queries.
     pub git: Box<dyn GitRepo>,
-    /// Shell executor for running commands.
+    /// Shell executor port for running external commands.
     pub shell: Box<dyn ShellExecutor>,
-    /// ID generator for unique identifiers.
+    /// ID generator port for producing unique identifiers.
     pub id_gen: Box<dyn IdGenerator>,
-    /// LLM client for language-model completions.
+    /// LLM client port for language-model completions.
     pub llm: Box<dyn LlmClient>,
-    /// Issue tracker for managing work items.
+    /// Issue tracker port for managing work items.
     pub issues: Box<dyn IssueTracker>,
     /// Optional cassette recorder; written to disk on drop.
     recorder: Option<CassetteRecorder>,
@@ -55,9 +56,9 @@ impl ServiceContext {
             fs: Box::new(LiveFileSystem),
             git: Box::new(LiveGitRepo),
             shell: Box::new(LiveShellExecutor),
-            id_gen: Box::new(PanickingIdGenerator),
-            llm: Box::new(PanickingLlmClient),
-            issues: Box::new(PanickingIssueTracker),
+            id_gen: Box::new(ReplayingIdGenerator::unconfigured()),
+            llm: Box::new(ReplayingLlmClient::unconfigured()),
+            issues: Box::new(ReplayingIssueTracker::unconfigured()),
             recorder: None,
         }
     }
@@ -79,60 +80,39 @@ impl ServiceContext {
             fs: Box::new(LiveFileSystem),
             git: Box::new(LiveGitRepo),
             shell: Box::new(LiveShellExecutor),
-            id_gen: Box::new(PanickingIdGenerator),
-            llm: Box::new(PanickingLlmClient),
-            issues: Box::new(PanickingIssueTracker),
+            id_gen: Box::new(ReplayingIdGenerator::unconfigured()),
+            llm: Box::new(ReplayingLlmClient::unconfigured()),
+            issues: Box::new(ReplayingIssueTracker::unconfigured()),
             recorder: Some(CassetteRecorder::new(path, "speck-session", "unknown")),
         }
     }
 
     /// Creates a replaying context from a monolithic cassette file.
     ///
-    /// All ports are served by a single cassette — each port/method pair
-    /// is dispatched to the right interaction stream automatically.
+    /// All ports share the same cassette replayer, serving interactions
+    /// in the order they were recorded.
     ///
     /// # Errors
     ///
     /// Returns an error if the cassette file cannot be read or parsed.
     pub fn replaying(path: &Path) -> Result<Self, String> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read cassette file {}: {e}", path.display()))?;
-        let cassette: crate::cassette::format::Cassette = serde_yaml::from_str(&content)
-            .map_err(|e| format!("Failed to parse cassette file {}: {e}", path.display()))?;
-
-        // Each port gets its own replayer from the same cassette so that
-        // per-port cursors are independent.
+        let replayer = Arc::new(Mutex::new(CassetteConfig::load_monolithic(path)?));
         Ok(Self {
-            clock: Box::new(ReplayingClock::new(crate::cassette::replayer::CassetteReplayer::new(
-                &cassette,
-            ))),
-            fs: Box::new(ReplayingFileSystem::new(
-                crate::cassette::replayer::CassetteReplayer::new(&cassette),
-            )),
-            git: Box::new(ReplayingGitRepo::new(crate::cassette::replayer::CassetteReplayer::new(
-                &cassette,
-            ))),
-            shell: Box::new(ReplayingShellExecutor::new(
-                crate::cassette::replayer::CassetteReplayer::new(&cassette),
-            )),
-            id_gen: Box::new(ReplayingIdGenerator::new(
-                crate::cassette::replayer::CassetteReplayer::new(&cassette),
-            )),
-            llm: Box::new(ReplayingLlmClient::new(
-                crate::cassette::replayer::CassetteReplayer::new(&cassette),
-            )),
-            issues: Box::new(ReplayingIssueTracker::new(
-                crate::cassette::replayer::CassetteReplayer::new(&cassette),
-            )),
+            clock: Box::new(ReplayingClock::new(Arc::clone(&replayer))),
+            fs: Box::new(ReplayingFileSystem::new(Arc::clone(&replayer))),
+            git: Box::new(ReplayingGitRepo::new(Arc::clone(&replayer))),
+            shell: Box::new(ReplayingShellExecutor::new(Arc::clone(&replayer))),
+            id_gen: Box::new(ReplayingIdGenerator::new(Arc::clone(&replayer))),
+            llm: Box::new(ReplayingLlmClient::new(Arc::clone(&replayer))),
+            issues: Box::new(ReplayingIssueTracker::new(replayer)),
             recorder: None,
         })
     }
 
-    /// Creates a replaying context from per-port cassette files.
+    /// Create a replaying context from per-port cassette configuration.
     ///
-    /// Each port can have its own cassette file. Ports without a configured
-    /// cassette file will use a panicking adapter that fails with a clear
-    /// message when called.
+    /// Each port gets its own cassette replayer. Ports without a configured
+    /// cassette will panic with a clear message when called.
     ///
     /// # Errors
     ///
@@ -140,37 +120,38 @@ impl ServiceContext {
     pub fn replaying_from(config: &CassetteConfig) -> Result<Self, String> {
         let replayers = config.load_all()?;
 
-        Ok(Self {
-            clock: match replayers.clock {
-                Some(r) => Box::new(ReplayingClock::new(r)),
-                None => Box::new(PanickingClock),
-            },
-            fs: match replayers.fs {
-                Some(r) => Box::new(ReplayingFileSystem::new(r)),
-                None => Box::new(PanickingFileSystem),
-            },
-            git: match replayers.git {
-                Some(r) => Box::new(ReplayingGitRepo::new(r)),
-                None => Box::new(PanickingGitRepo),
-            },
-            shell: match replayers.shell {
-                Some(r) => Box::new(ReplayingShellExecutor::new(r)),
-                None => Box::new(PanickingShellExecutor),
-            },
-            id_gen: match replayers.id_gen {
-                Some(r) => Box::new(ReplayingIdGenerator::new(r)),
-                None => Box::new(PanickingIdGenerator),
-            },
-            llm: match replayers.llm {
-                Some(r) => Box::new(ReplayingLlmClient::new(r)),
-                None => Box::new(PanickingLlmClient),
-            },
-            issues: match replayers.issues {
-                Some(r) => Box::new(ReplayingIssueTracker::new(r)),
-                None => Box::new(PanickingIssueTracker),
-            },
-            recorder: None,
-        })
+        let wrap = |r| Option::map(r, |r| Arc::new(Mutex::new(r)));
+
+        let clock: Box<dyn Clock> = match wrap(replayers.clock) {
+            Some(r) => Box::new(ReplayingClock::new(r)),
+            None => Box::new(ReplayingClock::unconfigured()),
+        };
+        let fs: Box<dyn FileSystem> = match wrap(replayers.fs) {
+            Some(r) => Box::new(ReplayingFileSystem::new(r)),
+            None => Box::new(ReplayingFileSystem::unconfigured()),
+        };
+        let git: Box<dyn GitRepo> = match wrap(replayers.git) {
+            Some(r) => Box::new(ReplayingGitRepo::new(r)),
+            None => Box::new(ReplayingGitRepo::unconfigured()),
+        };
+        let shell: Box<dyn ShellExecutor> = match wrap(replayers.shell) {
+            Some(r) => Box::new(ReplayingShellExecutor::new(r)),
+            None => Box::new(ReplayingShellExecutor::unconfigured()),
+        };
+        let id_gen: Box<dyn IdGenerator> = match wrap(replayers.id_gen) {
+            Some(r) => Box::new(ReplayingIdGenerator::new(r)),
+            None => Box::new(ReplayingIdGenerator::unconfigured()),
+        };
+        let llm: Box<dyn LlmClient> = match wrap(replayers.llm) {
+            Some(r) => Box::new(ReplayingLlmClient::new(r)),
+            None => Box::new(ReplayingLlmClient::unconfigured()),
+        };
+        let issues: Box<dyn IssueTracker> = match wrap(replayers.issues) {
+            Some(r) => Box::new(ReplayingIssueTracker::new(r)),
+            None => Box::new(ReplayingIssueTracker::unconfigured()),
+        };
+
+        Ok(Self { clock, fs, git, shell, id_gen, llm, issues, recorder: None })
     }
 }
 
@@ -184,118 +165,6 @@ impl Drop for ServiceContext {
     }
 }
 
-// --- Panicking adapters for unspecified ports ---
-
-struct PanickingClock;
-impl Clock for PanickingClock {
-    fn now(&self) -> chrono::DateTime<chrono::Utc> {
-        panic!("Clock port not configured in CassetteConfig — no cassette loaded for clock");
-    }
-}
-
-struct PanickingFileSystem;
-impl FileSystem for PanickingFileSystem {
-    fn read_to_string(
-        &self,
-        _path: &Path,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        panic!("FileSystem port not configured in CassetteConfig — no cassette loaded for fs");
-    }
-    fn write(
-        &self,
-        _path: &Path,
-        _contents: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        panic!("FileSystem port not configured in CassetteConfig — no cassette loaded for fs");
-    }
-    fn exists(&self, _path: &Path) -> bool {
-        panic!("FileSystem port not configured in CassetteConfig — no cassette loaded for fs");
-    }
-    fn list_dir(
-        &self,
-        _path: &Path,
-    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-        panic!("FileSystem port not configured in CassetteConfig — no cassette loaded for fs");
-    }
-}
-
-struct PanickingGitRepo;
-impl GitRepo for PanickingGitRepo {
-    fn current_commit(&self) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        panic!("GitRepo port not configured in CassetteConfig — no cassette loaded for git");
-    }
-    fn diff(&self) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        panic!("GitRepo port not configured in CassetteConfig — no cassette loaded for git");
-    }
-    fn list_files(
-        &self,
-        _path: &Path,
-    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-        panic!("GitRepo port not configured in CassetteConfig — no cassette loaded for git");
-    }
-}
-
-struct PanickingShellExecutor;
-impl ShellExecutor for PanickingShellExecutor {
-    fn run(
-        &self,
-        _command: &str,
-    ) -> Result<crate::ports::shell::ShellOutput, Box<dyn std::error::Error + Send + Sync>> {
-        panic!(
-            "ShellExecutor port not configured in CassetteConfig — no cassette loaded for shell"
-        );
-    }
-}
-
-struct PanickingIdGenerator;
-impl IdGenerator for PanickingIdGenerator {
-    fn generate_id(&self) -> String {
-        panic!("IdGenerator port not configured in CassetteConfig — no cassette loaded for id_gen");
-    }
-}
-
-struct PanickingLlmClient;
-impl LlmClient for PanickingLlmClient {
-    fn complete(
-        &self,
-        _request: &crate::ports::llm::CompletionRequest,
-    ) -> crate::ports::llm::LlmFuture<'_> {
-        panic!("LlmClient port not configured in CassetteConfig — no cassette loaded for llm");
-    }
-}
-
-struct PanickingIssueTracker;
-impl IssueTracker for PanickingIssueTracker {
-    fn create_issue(
-        &self,
-        _title: &str,
-        _body: &str,
-    ) -> Result<crate::ports::issues::Issue, Box<dyn std::error::Error + Send + Sync>> {
-        panic!(
-            "IssueTracker port not configured in CassetteConfig — no cassette loaded for issues"
-        );
-    }
-    fn update_issue(
-        &self,
-        _id: &str,
-        _title: Option<&str>,
-        _body: Option<&str>,
-        _status: Option<&str>,
-    ) -> Result<crate::ports::issues::Issue, Box<dyn std::error::Error + Send + Sync>> {
-        panic!(
-            "IssueTracker port not configured in CassetteConfig — no cassette loaded for issues"
-        );
-    }
-    fn list_issues(
-        &self,
-        _status: Option<&str>,
-    ) -> Result<Vec<crate::ports::issues::Issue>, Box<dyn std::error::Error + Send + Sync>> {
-        panic!(
-            "IssueTracker port not configured in CassetteConfig — no cassette loaded for issues"
-        );
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -303,7 +172,7 @@ mod tests {
     use chrono::Utc;
     use serde_json::json;
 
-    fn write_cassette(path: &Path, interactions: Vec<Interaction>) {
+    fn write_cassette_file(path: &Path, interactions: Vec<Interaction>) {
         let cassette = Cassette {
             name: "test".into(),
             recorded_at: Utc::now(),
@@ -315,69 +184,71 @@ mod tests {
     }
 
     #[test]
-    fn replaying_context_from_monolithic_cassette() {
-        let dir = std::env::temp_dir().join("speck_ctx_test_mono");
+    fn replaying_context_serves_recorded_data() {
+        let dir = std::env::temp_dir().join("speck_ctx_replaying");
         std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("full.cassette.yaml");
+        let path = dir.join("test.cassette.yaml");
 
-        write_cassette(
+        write_cassette_file(
             &path,
             vec![
                 Interaction {
                     seq: 0,
                     port: "clock".into(),
                     method: "now".into(),
-                    input: json!({}),
-                    output: json!("2024-06-15T10:30:00Z"),
+                    input: json!(null),
+                    output: json!("2024-01-15T12:00:00Z"),
                 },
                 Interaction {
                     seq: 1,
                     port: "id_gen".into(),
                     method: "generate_id".into(),
-                    input: json!({}),
-                    output: json!("uuid-001"),
+                    input: json!(null),
+                    output: json!("test-id-42"),
                 },
             ],
         );
 
         let ctx = ServiceContext::replaying(&path).unwrap();
-        let time = ctx.clock.now();
-        assert_eq!(time.to_rfc3339(), "2024-06-15T10:30:00+00:00");
+        let now = ctx.clock.now();
+        assert_eq!(now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true), "2024-01-15T12:00:00Z");
+
         let id = ctx.id_gen.generate_id();
-        assert_eq!(id, "uuid-001");
+        assert_eq!(id, "test-id-42");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn replaying_from_per_port_cassettes() {
-        let dir = std::env::temp_dir().join("speck_ctx_test_ports");
+    fn replaying_from_with_per_port_cassettes() {
+        let dir = std::env::temp_dir().join("speck_ctx_replaying_from");
         std::fs::create_dir_all(&dir).unwrap();
 
         let clock_path = dir.join("clock.cassette.yaml");
-        write_cassette(
+        write_cassette_file(
             &clock_path,
             vec![Interaction {
                 seq: 0,
                 port: "clock".into(),
                 method: "now".into(),
-                input: json!({}),
-                output: json!("2024-01-01T00:00:00Z"),
+                input: json!(null),
+                output: json!("2024-06-01T08:30:00Z"),
             }],
         );
 
         let config = CassetteConfig { clock: Some(clock_path), ..CassetteConfig::default() };
+
         let ctx = ServiceContext::replaying_from(&config).unwrap();
-        let time = ctx.clock.now();
-        assert_eq!(time.to_rfc3339(), "2024-01-01T00:00:00+00:00");
+        let now = ctx.clock.now();
+        assert_eq!(now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true), "2024-06-01T08:30:00Z");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    #[should_panic(expected = "not configured in CassetteConfig")]
-    fn unspecified_port_panics_with_clear_message() {
-        let config = CassetteConfig::panic_on_unspecified();
+    #[should_panic(expected = "no cassette configured for port")]
+    fn replaying_from_panics_on_unconfigured_port() {
+        let config = CassetteConfig::default();
         let ctx = ServiceContext::replaying_from(&config).unwrap();
         let _ = ctx.clock.now();
     }

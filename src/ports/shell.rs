@@ -1,7 +1,7 @@
 //! Shell executor port for running external commands.
 
 /// The output of a shell command execution.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ShellOutput {
     /// The exit code of the process.
     pub exit_code: i32,

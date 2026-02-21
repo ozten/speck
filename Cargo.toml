@@ -15,6 +15,9 @@ serde_json = "1"
 serde_yaml = "0.9"
 tokio = { version = "1", features = ["macros", "rt"] }
 
+[dev-dependencies]
+tokio = { version = "1.49.0", features = ["macros", "rt"] }
+
 [lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"
@@ -26,5 +29,3 @@ module_name_repetitions = "allow"
 [[bin]]
 name = "cassette_split"
 path = "src/bin/cassette_split.rs"
-
-[dev-dependencies]
