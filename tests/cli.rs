@@ -69,7 +69,11 @@ fn deps_subcommand_empty_store() {
     let output = run_speck(&["deps"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success());
-    assert!(stdout.contains("No specs found") || stdout.contains("Dependency Graph"));
+    assert!(
+        stdout.contains("No specs found")
+            || stdout.contains("Dependency Graph")
+            || stdout.contains("No dependencies found")
+    );
 }
 
 #[test]

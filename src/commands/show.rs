@@ -15,9 +15,24 @@ use crate::store::SpecStore;
 ///
 /// Returns an error string if spec loading fails.
 pub fn run(id: Option<&str>) -> Result<(), String> {
+    run_with_store(id, None)
+}
+
+/// Execute the `show` command with an optional explicit store root.
+///
+/// # Errors
+///
+/// Returns an error string if spec loading fails.
+pub fn run_with_store(
+    id: Option<&str>,
+    store_path: Option<&std::path::Path>,
+) -> Result<(), String> {
     let ctx = ServiceContext::live();
-    let store_root = store_root();
-    let store = SpecStore::new(&ctx, &store_root);
+    let root = match store_path {
+        Some(p) => p.to_path_buf(),
+        None => store_root(),
+    };
+    let store = SpecStore::new(&ctx, &root);
 
     if let Some(spec_id) = id {
         let spec = store.load_task_spec(spec_id)?;
@@ -128,17 +143,15 @@ mod tests {
 
     #[test]
     fn show_command_no_id_empty_store() {
-        std::env::set_var("SPECK_STORE", "/tmp/speck_test_show_empty_nonexistent");
-        let result = run(None);
-        std::env::remove_var("SPECK_STORE");
+        let dir = std::path::PathBuf::from("/tmp/speck_test_show_empty_nonexistent");
+        let result = run_with_store(None, Some(&dir));
         assert!(result.is_ok());
     }
 
     #[test]
     fn show_command_with_nonexistent_id() {
-        std::env::set_var("SPECK_STORE", "/tmp/speck_test_show_empty_nonexistent");
-        let result = run(Some("NONEXISTENT"));
-        std::env::remove_var("SPECK_STORE");
+        let dir = std::path::PathBuf::from("/tmp/speck_test_show_empty_nonexistent");
+        let result = run_with_store(Some("NONEXISTENT"), Some(&dir));
         assert!(result.is_err());
     }
 
@@ -168,9 +181,7 @@ mod tests {
         let yaml = serde_yaml::to_string(&spec).unwrap();
         std::fs::write(tasks_dir.join("TASK-1.yaml"), &yaml).unwrap();
 
-        std::env::set_var("SPECK_STORE", dir.to_str().unwrap());
-        let result = run(Some("TASK-1"));
-        std::env::remove_var("SPECK_STORE");
+        let result = run_with_store(Some("TASK-1"), Some(&dir));
 
         let _ = std::fs::remove_dir_all(&dir);
         assert!(result.is_ok());

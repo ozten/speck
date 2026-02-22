@@ -12,13 +12,29 @@ use crate::sync::beads;
 ///
 /// Returns an error string if sync target is invalid or sync fails.
 pub fn run(target: &str, dry_run: bool) -> Result<(), String> {
+    run_with_store(target, dry_run, None)
+}
+
+/// Execute the `sync` command with an optional explicit store root.
+///
+/// # Errors
+///
+/// Returns an error string if sync target is invalid or sync fails.
+pub fn run_with_store(
+    target: &str,
+    dry_run: bool,
+    store_path: Option<&std::path::Path>,
+) -> Result<(), String> {
     if target != "beads" {
         return Err(format!("Unknown sync target: {target}. Supported targets: beads"));
     }
 
     let ctx = ServiceContext::live();
-    let store_root = store_root();
-    let store = SpecStore::new(&ctx, &store_root);
+    let root = match store_path {
+        Some(p) => p.to_path_buf(),
+        None => store_root(),
+    };
+    let store = SpecStore::new(&ctx, &root);
 
     let spec_ids = store.list_task_specs()?;
     if spec_ids.is_empty() {
@@ -65,9 +81,8 @@ mod tests {
 
     #[test]
     fn sync_dry_run_empty_store() {
-        std::env::set_var("SPECK_STORE", "/tmp/speck_test_sync_empty_nonexistent");
-        let result = run("beads", true);
-        std::env::remove_var("SPECK_STORE");
+        let dir = std::path::PathBuf::from("/tmp/speck_test_sync_empty_nonexistent");
+        let result = run_with_store("beads", true, Some(&dir));
         assert!(result.is_ok());
     }
 }
