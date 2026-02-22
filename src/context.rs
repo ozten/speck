@@ -191,6 +191,14 @@ mod tests {
     }
 
     #[test]
+    fn live_constructor_does_not_panic() {
+        let ctx = ServiceContext::live();
+        // Verify we can call methods on each port without panicking.
+        let _now = ctx.clock.now();
+        let _id = ctx.id_gen.generate_id();
+    }
+
+    #[test]
     fn replaying_context_serves_recorded_data() {
         let dir = std::env::temp_dir().join("speck_ctx_replaying");
         std::fs::create_dir_all(&dir).unwrap();
