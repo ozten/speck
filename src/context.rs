@@ -76,7 +76,22 @@ impl ServiceContext {
     /// Returns an error if the recording session cannot be initialized.
     pub fn recording() -> Result<(Self, RecordingSession), String> {
         let session = RecordingSession::new()?;
+        Ok(Self::recording_with_session(session))
+    }
 
+    /// Create a recording context writing to the given output directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the recording session cannot be initialized.
+    pub fn recording_at(
+        output_dir: std::path::PathBuf,
+    ) -> Result<(Self, RecordingSession), String> {
+        let session = RecordingSession::new_at(output_dir)?;
+        Ok(Self::recording_with_session(session))
+    }
+
+    fn recording_with_session(session: RecordingSession) -> (Self, RecordingSession) {
         let ctx = Self {
             clock: Box::new(RecordingClock::new(Box::new(LiveClock), Arc::clone(&session.clock))),
             fs: Box::new(RecordingFileSystem::new(
@@ -102,7 +117,7 @@ impl ServiceContext {
             )),
         };
 
-        Ok((ctx, session))
+        (ctx, session)
     }
 
     /// Creates a replaying context from a monolithic cassette file.

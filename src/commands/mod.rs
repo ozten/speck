@@ -9,6 +9,7 @@ pub mod sync;
 pub mod validate;
 
 use std::env;
+use std::path::PathBuf;
 
 use crate::cassette::session::RecordingSession;
 use crate::cli::Command;
@@ -16,17 +17,15 @@ use crate::context::ServiceContext;
 
 /// Dispatch a parsed command to its handler.
 ///
-/// When `SPECK_REC=true` is set, all port interactions are recorded to
-/// per-port cassette files in `.speck/cassettes/<timestamp>/`.
+/// When `SPECK_RECORD` is set to a directory path, all port interactions are
+/// recorded to per-port cassette files in that directory.
 ///
 /// # Errors
 ///
 /// Returns an error string if the selected command handler fails.
 pub fn dispatch(command: &Command) -> Result<(), String> {
-    let recording_enabled = env::var("SPECK_REC").map(|v| v == "true").unwrap_or(false);
-
-    let (ctx, session) = if recording_enabled {
-        let (ctx, session) = ServiceContext::recording()?;
+    let (ctx, session) = if let Ok(path) = env::var("SPECK_RECORD") {
+        let (ctx, session) = ServiceContext::recording_at(PathBuf::from(path))?;
         (ctx, Some(session))
     } else {
         (ServiceContext::live(), None)

@@ -43,7 +43,19 @@ impl RecordingSession {
     pub fn new() -> Result<Self, String> {
         let timestamp = Utc::now().format("%Y-%m-%dT%H-%M-%S").to_string();
         let output_dir = PathBuf::from(".speck/cassettes").join(&timestamp);
+        Self::new_at(output_dir)
+    }
 
+    /// Create a new recording session writing to the given output directory.
+    ///
+    /// Per-port cassette files will be created inside the directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The cassette directory already exists
+    /// - The directory cannot be created
+    pub fn new_at(output_dir: PathBuf) -> Result<Self, String> {
         if output_dir.exists() {
             return Err(format!("Cassette directory already exists: {}", output_dir.display()));
         }
@@ -52,10 +64,12 @@ impl RecordingSession {
             .map_err(|e| format!("Failed to create cassette directory: {e}"))?;
 
         let commit = get_commit_hash();
+        let name_prefix =
+            output_dir.file_name().and_then(|n| n.to_str()).unwrap_or("recording").to_string();
 
         let make_recorder = |port: &str| -> Arc<Mutex<CassetteRecorder>> {
             let path = output_dir.join(format!("{port}.cassette.yaml"));
-            let name = format!("{timestamp}-{port}");
+            let name = format!("{name_prefix}-{port}");
             Arc::new(Mutex::new(CassetteRecorder::new(path, &name, &commit)))
         };
 
