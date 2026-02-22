@@ -42,7 +42,8 @@ mod tests {
 
         // Scope the adapter so it's dropped before we try to unwrap
         let id = {
-            let gen = RecordingIdGenerator::new(Box::new(LiveIdGenerator::new()), Arc::clone(&recorder));
+            let gen =
+                RecordingIdGenerator::new(Box::new(LiveIdGenerator::new()), Arc::clone(&recorder));
             gen.generate_id()
         };
         assert!(!id.is_empty());

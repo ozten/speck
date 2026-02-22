@@ -78,18 +78,12 @@ impl ServiceContext {
         let session = RecordingSession::new()?;
 
         let ctx = Self {
-            clock: Box::new(RecordingClock::new(
-                Box::new(LiveClock),
-                Arc::clone(&session.clock),
-            )),
+            clock: Box::new(RecordingClock::new(Box::new(LiveClock), Arc::clone(&session.clock))),
             fs: Box::new(RecordingFileSystem::new(
                 Box::new(LiveFileSystem),
                 Arc::clone(&session.fs),
             )),
-            git: Box::new(RecordingGitRepo::new(
-                Box::new(LiveGitRepo),
-                Arc::clone(&session.git),
-            )),
+            git: Box::new(RecordingGitRepo::new(Box::new(LiveGitRepo), Arc::clone(&session.git))),
             shell: Box::new(RecordingShellExecutor::new(
                 Box::new(LiveShellExecutor),
                 Arc::clone(&session.shell),

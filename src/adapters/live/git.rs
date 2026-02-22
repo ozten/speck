@@ -32,9 +32,7 @@ impl GitRepo for LiveGitRepo {
         path: &Path,
     ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
         let path_str = path.to_string_lossy();
-        let output = Command::new("git")
-            .args(["ls-files", &path_str])
-            .output()?;
+        let output = Command::new("git").args(["ls-files", &path_str]).output()?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(format!("git ls-files failed: {stderr}").into());

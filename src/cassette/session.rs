@@ -45,10 +45,7 @@ impl RecordingSession {
         let output_dir = PathBuf::from(".speck/cassettes").join(&timestamp);
 
         if output_dir.exists() {
-            return Err(format!(
-                "Cassette directory already exists: {}",
-                output_dir.display()
-            ));
+            return Err(format!("Cassette directory already exists: {}", output_dir.display()));
         }
 
         std::fs::create_dir_all(&output_dir)
@@ -82,17 +79,12 @@ impl RecordingSession {
     ///
     /// Returns an error if any cassette file cannot be written.
     pub fn finish(self) -> Result<PathBuf, String> {
-        fn finish_one(
-            arc: Arc<Mutex<CassetteRecorder>>,
-            port: &str,
-        ) -> Result<(), String> {
+        fn finish_one(arc: Arc<Mutex<CassetteRecorder>>, port: &str) -> Result<(), String> {
             let recorder = Arc::try_unwrap(arc)
                 .map_err(|_| format!("Recording adapter for {port} still has references"))?
                 .into_inner()
                 .map_err(|e| format!("Recorder lock for {port} poisoned: {e}"))?;
-            recorder
-                .finish()
-                .map_err(|e| format!("Failed to write {port} cassette: {e}"))?;
+            recorder.finish().map_err(|e| format!("Failed to write {port} cassette: {e}"))?;
             Ok(())
         }
 
