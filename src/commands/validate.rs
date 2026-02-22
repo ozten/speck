@@ -1,6 +1,6 @@
 //! `speck validate` command.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::context::ServiceContext;
 use crate::store::SpecStore;
@@ -16,13 +16,21 @@ use crate::validate;
 ///
 /// Returns an error string if no spec is specified (and `--all` is not set),
 /// or if loading/validation fails.
-pub fn run_with_context(ctx: &ServiceContext, spec_id: Option<&str>, all: bool) -> Result<(), String> {
+pub fn run_with_context(
+    ctx: &ServiceContext,
+    spec_id: Option<&str>,
+    all: bool,
+    override_store_root: Option<&Path>,
+) -> Result<(), String> {
     if spec_id.is_none() && !all {
         return Err("Provide a SPEC_ID or use --all to validate all specs".to_string());
     }
 
-    let store_root = store_root()?;
-    let store = SpecStore::new(ctx, &store_root);
+    let resolved_root = match override_store_root {
+        Some(root) => root.to_path_buf(),
+        None => store_root()?,
+    };
+    let store = SpecStore::new(ctx, &resolved_root);
 
     let mut results = Vec::new();
 
@@ -64,7 +72,7 @@ pub fn run_with_context(ctx: &ServiceContext, spec_id: Option<&str>, all: bool) 
 /// or if loading/validation fails.
 pub fn run(spec_id: Option<&str>, all: bool) -> Result<(), String> {
     let ctx = ServiceContext::live();
-    run_with_context(&ctx, spec_id, all)
+    run_with_context(&ctx, spec_id, all, None)
 }
 
 /// Resolve the spec store root directory.
@@ -89,17 +97,17 @@ mod tests {
 
     #[test]
     fn cli_validate_all_empty_store() {
-        std::env::set_var("SPECK_STORE", "/tmp/speck_test_empty_store_nonexistent");
-        let result = run(None, true);
-        std::env::remove_var("SPECK_STORE");
+        let dir = PathBuf::from("/tmp/speck_test_empty_store_nonexistent");
+        let ctx = ServiceContext::live();
+        let result = run_with_context(&ctx, None, true, Some(&dir));
         assert!(result.is_ok());
     }
 
     #[test]
     fn cli_validate_single_spec_not_found() {
-        std::env::set_var("SPECK_STORE", "/tmp/speck_test_empty_store_nonexistent");
-        let result = run(Some("NONEXISTENT"), false);
-        std::env::remove_var("SPECK_STORE");
+        let dir = PathBuf::from("/tmp/speck_test_empty_store_nonexistent");
+        let ctx = ServiceContext::live();
+        let result = run_with_context(&ctx, Some("NONEXISTENT"), false, Some(&dir));
         assert!(result.is_err());
     }
 
@@ -129,9 +137,8 @@ mod tests {
         let yaml = serde_yaml::to_string(&spec).unwrap();
         std::fs::write(tasks_dir.join("TASK-1.yaml"), &yaml).unwrap();
 
-        std::env::set_var("SPECK_STORE", dir.to_str().unwrap());
-        let result = run(Some("TASK-1"), false);
-        std::env::remove_var("SPECK_STORE");
+        let ctx = ServiceContext::live();
+        let result = run_with_context(&ctx, Some("TASK-1"), false, Some(&dir));
 
         let _ = std::fs::remove_dir_all(&dir);
         assert!(result.is_ok());
@@ -163,9 +170,8 @@ mod tests {
         let yaml = serde_yaml::to_string(&spec).unwrap();
         std::fs::write(tasks_dir.join("TASK-2.yaml"), &yaml).unwrap();
 
-        std::env::set_var("SPECK_STORE", dir.to_str().unwrap());
-        let result = run(Some("TASK-2"), false);
-        std::env::remove_var("SPECK_STORE");
+        let ctx = ServiceContext::live();
+        let result = run_with_context(&ctx, Some("TASK-2"), false, Some(&dir));
 
         let _ = std::fs::remove_dir_all(&dir);
         assert!(result.is_err());

@@ -1,6 +1,6 @@
 //! `speck status` command.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::context::ServiceContext;
 use crate::spec::SignalType;
@@ -15,9 +15,21 @@ use crate::store::SpecStore;
 ///
 /// Returns an error string if spec listing or loading fails.
 pub fn run() -> Result<(), String> {
+    run_with_store_root(None)
+}
+
+/// Execute the `status` command with an optional explicit store root.
+///
+/// # Errors
+///
+/// Returns an error string if spec listing or loading fails.
+pub fn run_with_store_root(override_root: Option<&Path>) -> Result<(), String> {
     let ctx = ServiceContext::live();
-    let store_root = store_root();
-    let store = SpecStore::new(&ctx, &store_root);
+    let root = match override_root {
+        Some(r) => r.to_path_buf(),
+        None => store_root(),
+    };
+    let store = SpecStore::new(&ctx, &root);
 
     let mut ids = store.list_task_specs()?;
     if ids.is_empty() {
@@ -80,9 +92,8 @@ mod tests {
 
     #[test]
     fn status_command_empty_store() {
-        std::env::set_var("SPECK_STORE", "/tmp/speck_test_status_empty_nonexistent");
-        let result = run();
-        std::env::remove_var("SPECK_STORE");
+        let dir = PathBuf::from("/tmp/speck_test_status_empty_nonexistent");
+        let result = run_with_store_root(Some(&dir));
         assert!(result.is_ok());
     }
 
@@ -125,9 +136,7 @@ mod tests {
         std::fs::write(tasks_dir.join("TASK-2.yaml"), serde_yaml::to_string(&spec2).unwrap())
             .unwrap();
 
-        std::env::set_var("SPECK_STORE", dir.to_str().unwrap());
-        let result = run();
-        std::env::remove_var("SPECK_STORE");
+        let result = run_with_store_root(Some(&dir));
 
         let _ = std::fs::remove_dir_all(&dir);
         assert!(result.is_ok());

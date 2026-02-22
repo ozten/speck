@@ -23,9 +23,7 @@ use crate::context::ServiceContext;
 ///
 /// Returns an error string if the selected command handler fails.
 pub fn dispatch(command: &Command) -> Result<(), String> {
-    let recording_enabled = env::var("SPECK_REC")
-        .map(|v| v == "true")
-        .unwrap_or(false);
+    let recording_enabled = env::var("SPECK_REC").map(|v| v == "true").unwrap_or(false);
 
     let (ctx, session) = if recording_enabled {
         let (ctx, session) = ServiceContext::recording()?;
@@ -50,7 +48,9 @@ pub fn dispatch(command: &Command) -> Result<(), String> {
 fn dispatch_with_context(command: &Command, ctx: &ServiceContext) -> Result<(), String> {
     match command {
         Command::Plan => plan::run(),
-        Command::Validate { spec_id, all } => validate::run_with_context(ctx, spec_id.as_deref(), *all),
+        Command::Validate { spec_id, all } => {
+            validate::run_with_context(ctx, spec_id.as_deref(), *all, None)
+        }
         Command::Map { diff } => map::run(*diff),
         Command::Show { id } => show::run(id.as_deref()),
         Command::Status => status::run(),
