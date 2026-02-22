@@ -1,7 +1,7 @@
 //! Record-replay round-trip integration test.
 //!
 //! Proves that the record/replay system works end-to-end:
-//! 1. Record a session using `CassetteRecorder` (exercises clock, fs, id_gen).
+//! 1. Record a session using `CassetteRecorder` (exercises clock, fs, `id_gen`).
 //! 2. Replay the cassette using `ServiceContext::replaying()`.
 //! 3. Assert identical outputs between recording and replaying.
 //! 4. Replay a second time and assert determinism.
@@ -13,7 +13,7 @@ use serde_json::json;
 use speck::cassette::recorder::CassetteRecorder;
 use speck::context::ServiceContext;
 
-/// Exercises the clock, fs, and id_gen ports on the given context,
+/// Exercises the clock, fs, and `id_gen` ports on the given context,
 /// returning a snapshot of all outputs for comparison.
 fn exercise_ports(ctx: &ServiceContext) -> (String, String, bool, String) {
     let time = ctx.clock.now().to_rfc3339();

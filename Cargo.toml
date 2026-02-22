@@ -5,6 +5,7 @@ edition = "2021"
 description = "Minimal CLI scaffold for planning and verification workflows"
 license = "MIT"
 repository = "https://example.com/speck"
+default-run = "speck"
 
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }

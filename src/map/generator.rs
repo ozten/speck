@@ -298,7 +298,7 @@ mod tests {
 
     #[test]
     fn extract_public_items_finds_pub_declarations() {
-        let code = r#"
+        let code = r"
 pub fn hello() {}
 fn private() {}
 pub struct Foo {
@@ -306,7 +306,7 @@ pub struct Foo {
 }
 pub trait Bar {}
 struct Hidden;
-"#;
+";
         let mut items = Vec::new();
         extract_public_items(code, &mut items);
         assert_eq!(items, vec!["fn hello", "struct Foo", "trait Bar"]);
@@ -314,11 +314,11 @@ struct Hidden;
 
     #[test]
     fn extract_dependencies_finds_crate_uses() {
-        let code = r#"
+        let code = r"
 use crate::context;
 use crate::ports::filesystem;
 use std::path::Path;
-"#;
+";
         let mut deps = Vec::new();
         extract_dependencies(code, &mut deps);
         assert_eq!(deps, vec!["context", "ports"]);
