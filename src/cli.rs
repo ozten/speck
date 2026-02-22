@@ -1,5 +1,7 @@
 //! CLI argument definitions.
 
+use std::path::PathBuf;
+
 use clap::{Parser, Subcommand};
 
 /// Top-level CLI parser for `speck`.
@@ -15,7 +17,15 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Produce a lightweight implementation plan.
-    Plan,
+    #[command(group = clap::ArgGroup::new("input").multiple(false))]
+    Plan {
+        /// Requirement text to plan against.
+        #[arg(group = "input")]
+        requirement: Option<String>,
+        /// Read requirement from a file.
+        #[arg(long, group = "input")]
+        from: Option<PathBuf>,
+    },
     /// Validate behavior and quality checks.
     Validate {
         /// The spec ID to validate.
@@ -57,7 +67,31 @@ mod tests {
     #[test]
     fn parses_plan_subcommand() {
         let cli = Cli::parse_from(["speck", "plan"]);
-        assert!(matches!(cli.command, Command::Plan));
+        assert!(matches!(cli.command, Command::Plan { requirement: None, from: None }));
+    }
+
+    #[test]
+    fn parses_plan_with_requirement() {
+        let cli = Cli::parse_from(["speck", "plan", "add login page"]);
+        assert!(matches!(cli.command, Command::Plan { requirement: Some(_), from: None }));
+        if let Command::Plan { requirement, .. } = cli.command {
+            assert_eq!(requirement.unwrap(), "add login page");
+        }
+    }
+
+    #[test]
+    fn parses_plan_with_from() {
+        let cli = Cli::parse_from(["speck", "plan", "--from", "requirements.md"]);
+        assert!(matches!(cli.command, Command::Plan { requirement: None, from: Some(_) }));
+        if let Command::Plan { from, .. } = cli.command {
+            assert_eq!(from.unwrap().to_str().unwrap(), "requirements.md");
+        }
+    }
+
+    #[test]
+    fn plan_rejects_both_requirement_and_from() {
+        let result = Cli::try_parse_from(["speck", "plan", "some text", "--from", "file.md"]);
+        assert!(result.is_err());
     }
 
     #[test]
