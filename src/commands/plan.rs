@@ -5,12 +5,14 @@ use std::path::PathBuf;
 
 use crate::context::ServiceContext;
 use crate::plan::conversation::ConversationLoop;
+use crate::plan::reconcile::{self, ReconciliationResult};
 use crate::plan::signal::{
     self, ClassificationResult, SignalType as PlanSignalType,
     VerificationStrategy as PlanVerificationStrategy,
 };
 use crate::plan::survey::{broad_survey, SurveyResult};
 use crate::spec::{SignalType, TaskSpec, VerificationCheck, VerificationStrategy};
+use crate::store::SpecStore;
 
 /// Execute the `plan` command.
 ///
@@ -73,13 +75,41 @@ pub fn run(
     let stdin = std::io::stdin().lock();
     let stdout = std::io::stdout();
     let conv = ConversationLoop::new(initial_specs, stdin, stdout);
-    let refined_specs =
+    let mut refined_specs =
         rt.block_on(conv.run(ctx)).map_err(|e| format!("conversation loop failed: {e}"))?;
 
     println!("\n=== Refined Task Specs ({}) ===", refined_specs.len());
     for spec in &refined_specs {
         println!("  {} — {:?} — {:?}", spec.title, spec.signal_type, spec.verification);
     }
+
+    // Pass 2.5: Reconciliation
+    let reconciliation = rt
+        .block_on(reconcile::reconcile(ctx, &refined_specs))
+        .map_err(|e| format!("reconciliation failed: {e}"))?;
+
+    print_reconciliation(&reconciliation);
+
+    // Assign IDs to specs that don't have one yet
+    for spec in &mut refined_specs {
+        if spec.id.is_empty() {
+            spec.id = ctx.id_gen.generate_id();
+        }
+    }
+
+    // Persist final specs to the store
+    let store_root = store_root()?;
+    let store = SpecStore::new(ctx, &store_root);
+    for spec in &refined_specs {
+        store.save_task_spec(spec)?;
+    }
+
+    // Print summary
+    println!("\n=== Saved Specs ===");
+    for spec in &refined_specs {
+        println!("  {} — {}", spec.id, spec.title);
+    }
+    println!("{} spec(s) saved to {}", refined_specs.len(), store_root.display());
 
     Ok(())
 }
@@ -219,6 +249,63 @@ fn build_task_spec(
         acceptance_criteria: vec![],
         signal_type,
         verification,
+    }
+}
+
+/// Resolve the store root for `.speck/` persistence.
+fn store_root() -> Result<PathBuf, String> {
+    if let Ok(val) = std::env::var("SPECK_STORE") {
+        return Ok(PathBuf::from(val));
+    }
+    let cwd =
+        std::env::current_dir().map_err(|e| format!("failed to get current directory: {e}"))?;
+    Ok(cwd.join(".speck"))
+}
+
+/// Print a `ReconciliationResult` to stdout in a human-readable format.
+fn print_reconciliation(result: &ReconciliationResult) {
+    println!("\n=== Reconciliation ===");
+
+    if result.suggested_merges.is_empty()
+        && result.suggested_extractions.is_empty()
+        && result.suggested_reorders.is_empty()
+        && result.circular_dependencies.is_empty()
+    {
+        println!("  No issues found.");
+        return;
+    }
+
+    if !result.suggested_merges.is_empty() {
+        println!("  Merge suggestions:");
+        for m in &result.suggested_merges {
+            println!("    - {} -> \"{}\" ({})", m.task_ids.join(", "), m.merged_title, m.reason);
+        }
+    }
+
+    if !result.suggested_extractions.is_empty() {
+        println!("  Extraction suggestions:");
+        for e in &result.suggested_extractions {
+            println!(
+                "    - {} -> \"{}\" ({})",
+                e.task_ids.join(", "),
+                e.suggested_task_title,
+                e.abstraction
+            );
+        }
+    }
+
+    if !result.suggested_reorders.is_empty() {
+        println!("  Reorder suggestions:");
+        for r in &result.suggested_reorders {
+            println!("    - {} should precede {} ({})", r.task_id, r.should_precede, r.reason);
+        }
+    }
+
+    if !result.circular_dependencies.is_empty() {
+        println!("  Circular dependencies:");
+        for cycle in &result.circular_dependencies {
+            println!("    - {}", cycle.join(" -> "));
+        }
     }
 }
 
