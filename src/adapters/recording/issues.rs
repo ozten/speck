@@ -91,7 +91,8 @@ mod tests {
 
         // Scope the adapter so it's dropped before we try to unwrap
         {
-            let tracker = RecordingIssueTracker::new(Box::new(LiveIssueTracker), Arc::clone(&recorder));
+            let tracker =
+                RecordingIssueTracker::new(Box::new(LiveIssueTracker), Arc::clone(&recorder));
             // This will fail since LiveIssueTracker is a stub, but it should still record
             let _ = tracker.create_issue("Test Issue", "Test body");
         }

@@ -50,7 +50,8 @@ mod tests {
 
         // Scope the adapter so it's dropped before we try to unwrap
         {
-            let shell = RecordingShellExecutor::new(Box::new(LiveShellExecutor), Arc::clone(&recorder));
+            let shell =
+                RecordingShellExecutor::new(Box::new(LiveShellExecutor), Arc::clone(&recorder));
             let result = shell.run("echo hello");
             assert!(result.is_ok());
         }

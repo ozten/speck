@@ -50,10 +50,7 @@ impl FileSystem for RecordingFileSystem {
         contents: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let result = self.inner.write(path, contents);
-        let input = WriteInput {
-            path: &path.display().to_string(),
-            contents,
-        };
+        let input = WriteInput { path: &path.display().to_string(), contents };
         record_result(&self.recorder, "fs", "write", &input, &result);
         result
     }

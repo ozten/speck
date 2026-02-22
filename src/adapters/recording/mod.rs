@@ -27,10 +27,8 @@ pub(crate) fn record_interaction<I, O>(
     I: Serialize,
     O: Serialize,
 {
-    let input_json =
-        serde_json::to_value(input).expect("failed to serialize recording input");
-    let output_json =
-        serde_json::to_value(output).expect("failed to serialize recording output");
+    let input_json = serde_json::to_value(input).expect("failed to serialize recording input");
+    let output_json = serde_json::to_value(output).expect("failed to serialize recording output");
 
     let mut guard = recorder.lock().expect("recorder lock poisoned");
     guard.record(port, method, input_json, output_json);
@@ -54,8 +52,7 @@ pub(crate) fn record_result<T, E, I>(
     E: std::fmt::Display,
     I: Serialize,
 {
-    let input_json =
-        serde_json::to_value(input).expect("failed to serialize recording input");
+    let input_json = serde_json::to_value(input).expect("failed to serialize recording input");
 
     let output_json = match result {
         Ok(v) => {

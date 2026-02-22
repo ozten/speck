@@ -5,7 +5,7 @@ use std::env;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
-use crate::ports::llm::{CompletionRequest, CompletionResponse, LlmClient, CompletionFuture};
+use crate::ports::llm::{CompletionFuture, CompletionRequest, CompletionResponse, LlmClient};
 
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
