@@ -4,6 +4,7 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use crate::context::ServiceContext;
+use crate::plan::conversation::ConversationLoop;
 use crate::plan::signal::{
     self, ClassificationResult, SignalType as PlanSignalType,
     VerificationStrategy as PlanVerificationStrategy,
@@ -45,14 +46,39 @@ pub fn run(
         .block_on(signal::classify(ctx.llm.as_ref(), &requirement_text, &codebase_context))
         .map_err(|e| format!("signal classification failed: {e}"))?;
 
-    match classification {
+    let initial_specs = match classification {
         ClassificationResult::Classified { signal_type, strategy } => {
             let task_spec = build_task_spec(&requirement_text, &signal_type, strategy);
             print_classification(&task_spec);
+            vec![task_spec]
         }
         ClassificationResult::PushbackRequired { reason } => {
-            eprintln!("Warning: pushback required — {reason}");
+            eprintln!("Note: pushback required — {reason}");
+            // Create a minimal spec with empty verification so the conversation loop
+            // can refine it interactively.
+            let task_spec = TaskSpec {
+                id: String::new(),
+                title: requirement_text.clone(),
+                requirement: Some(requirement_text),
+                context: None,
+                acceptance_criteria: vec![],
+                signal_type: SignalType::Fuzzy,
+                verification: VerificationStrategy::DirectAssertion { checks: vec![] },
+            };
+            vec![task_spec]
         }
+    };
+
+    // Pass 3: Interactive conversation loop
+    let stdin = std::io::stdin().lock();
+    let stdout = std::io::stdout();
+    let conv = ConversationLoop::new(initial_specs, stdin, stdout);
+    let refined_specs =
+        rt.block_on(conv.run(ctx)).map_err(|e| format!("conversation loop failed: {e}"))?;
+
+    println!("\n=== Refined Task Specs ({}) ===", refined_specs.len());
+    for spec in &refined_specs {
+        println!("  {} — {:?} — {:?}", spec.title, spec.signal_type, spec.verification);
     }
 
     Ok(())
