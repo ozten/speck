@@ -43,9 +43,9 @@ mod tests {
     use super::run;
 
     #[test]
-    fn run_executes_plan() {
+    fn run_plan_without_requirement_errors() {
         let result = run(["speck", "plan"]);
-        assert!(result.is_ok());
+        assert!(result.is_err());
     }
 
     #[test]

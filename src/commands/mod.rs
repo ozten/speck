@@ -48,7 +48,7 @@ pub fn dispatch(command: &Command) -> Result<(), String> {
 fn dispatch_with_context(command: &Command, ctx: &ServiceContext) -> Result<(), String> {
     match command {
         Command::Plan { ref requirement, ref from } => {
-            plan::run(requirement.as_deref(), from.as_ref())
+            plan::run(ctx, requirement.as_deref(), from.as_ref())
         }
         Command::Validate { spec_id, all } => {
             validate::run_with_context(ctx, spec_id.as_deref(), *all, None)

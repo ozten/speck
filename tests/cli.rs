@@ -8,11 +8,11 @@ fn run_speck(args: &[&str]) -> std::process::Output {
 }
 
 #[test]
-fn plan_subcommand_prints_stub_message() {
+fn plan_subcommand_without_requirement_errors() {
     let output = run_speck(&["plan"]);
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success());
-    assert!(stdout.contains("not yet implemented"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(stderr.contains("requirement text is required"));
 }
 
 #[test]
