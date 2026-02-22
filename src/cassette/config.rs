@@ -122,10 +122,17 @@ mod tests {
         assert!(config.issues.is_none());
     }
 
+    fn unique_test_dir(prefix: &str) -> PathBuf {
+        let id =
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("{prefix}_{id}_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
     #[test]
     fn load_monolithic_cassette() {
-        let dir = std::env::temp_dir().join("speck_config_test_mono");
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = unique_test_dir("speck_config_test_mono");
         let path = dir.join("full.cassette.yaml");
 
         write_cassette(
@@ -159,8 +166,7 @@ mod tests {
 
     #[test]
     fn load_per_port_cassettes() {
-        let dir = std::env::temp_dir().join("speck_config_test_ports");
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = unique_test_dir("speck_config_test_ports");
 
         let llm_path = dir.join("llm.cassette.yaml");
         write_cassette(
