@@ -226,3 +226,6 @@ Before closing a task, run these commands and ensure they pass:
 
 <!-- Promoted from R5 [reliability] -->
 - Rapid sequential cargo test runs can conflict when tests create temporary directories (e.g., .speck/cassettes/). Avoid listing cargo test in the Verify section to prevent double-runs against the test gate.
+
+<!-- Promoted from R5 [workflow] -->
+- **Documentation-first discovery**: When working with external tool config or unfamiliar CLI tools, FIRST check `--help`, README, and docs directories. Never use `strings`, `strace`, or binary inspection to reverse-engineer formats. The correct discovery order is: (1) `tool --help` / `tool subcommand --help`, (2) README or docs/ in the tool's directory, (3) existing usage examples in the codebase via Grep, (4) only then experiment by running the tool with test inputs.
