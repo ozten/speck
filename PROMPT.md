@@ -17,10 +17,20 @@ Every time you are about to call a tool, ask: "Is there another independent call
 **A session with ZERO parallel calls is a failure.** Target at least 5 turns with 2+ parallel calls per session.
 
 ### Rule B: NEVER emit a text-only turn. Every assistant message MUST include at least one tool call.
-WRONG: "Let me check the tests." (turn 1) → `Grep(tests/)` (turn 2)
-RIGHT: "Let me check the tests." + `Grep(tests/)` (turn 1 — one message, includes both text AND tool call)
-
 If you want to narrate what you're doing, include the narration AND the tool call in the same message. A text-only turn doubles your turn count for zero benefit.
+
+**Common violations — NEVER do these:**
+- WRONG: "Let me check the tests." (turn 1) → `Grep(tests/)` (turn 2)
+- WRONG: "I'll now read the file and make changes." (turn 1) → `Read(file)` (turn 2)
+- WRONG: "The tests passed. Let me now run clippy." (turn 1) → `Bash(cargo clippy)` (turn 2)
+- WRONG: "I see the issue. The function needs X." (turn 1) → `Edit(file)` (turn 2)
+
+**RIGHT pattern — always combine narration with action:**
+- RIGHT: "Let me check the tests." + `Grep(tests/)` → ONE turn
+- RIGHT: "Tests passed, running clippy." + `Bash(cargo clippy)` → ONE turn
+- RIGHT: "I see the issue — fixing now." + `Edit(file)` → ONE turn
+
+**Target: 0% narration-only turns per session.** Every turn where you only emit text is a wasted API round-trip.
 
 ### Rule C: After closing your bead, EXIT IMMEDIATELY.
 Do NOT triage other beads. Do NOT run `bd ready` to find more work. Do NOT explore what to do next.
