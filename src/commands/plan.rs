@@ -219,7 +219,12 @@ fn map_verification_strategy(plan_strategy: PlanVerificationStrategy) -> Verific
             VerificationStrategy::DirectAssertion {
                 checks: sub_assertions
                     .into_iter()
-                    .map(|sa| plan_check_to_verification(sa.check))
+                    .map(|sa| match sa.check {
+                        PlanCheck::Custom { description } => VerificationCheck::Custom {
+                            description: format!("{}: {}", sa.description, description),
+                        },
+                        other => plan_check_to_verification(other),
+                    })
                     .collect(),
             }
         }
@@ -445,18 +450,50 @@ mod tests {
     #[test]
     fn map_strategy_structural_decomposition() {
         let plan_strategy = PlanVS::StructuralDecomposition {
-            sub_assertions: vec![SubAssertion {
-                description: "ordered".into(),
-                check: PlanCheck::Custom { description: "assert sorted".into() },
-            }],
+            sub_assertions: vec![
+                SubAssertion {
+                    description: "ordered".into(),
+                    check: PlanCheck::Custom { description: "assert sorted".into() },
+                },
+                SubAssertion {
+                    description: "runs tests".into(),
+                    check: PlanCheck::TestSuite {
+                        command: "cargo test".into(),
+                        expected: "all pass".into(),
+                    },
+                },
+                SubAssertion {
+                    description: "check output".into(),
+                    check: PlanCheck::CommandOutput {
+                        command: "ls".into(),
+                        expected: "file.txt".into(),
+                    },
+                },
+            ],
         };
         let spec_strategy = map_verification_strategy(plan_strategy);
         match spec_strategy {
             VerificationStrategy::DirectAssertion { checks } => {
-                assert_eq!(checks.len(), 1);
+                assert_eq!(checks.len(), 3);
+                // Custom checks get description prefixed
                 assert_eq!(
                     checks[0],
-                    VerificationCheck::Custom { description: "assert sorted".into() }
+                    VerificationCheck::Custom { description: "ordered: assert sorted".into() }
+                );
+                // Executable checks pass through directly
+                assert_eq!(
+                    checks[1],
+                    VerificationCheck::TestSuite {
+                        command: "cargo test".into(),
+                        expected: "all pass".into(),
+                    }
+                );
+                assert_eq!(
+                    checks[2],
+                    VerificationCheck::CommandOutput {
+                        command: "ls".into(),
+                        expected: "file.txt".into(),
+                    }
                 );
             }
             other => panic!("expected DirectAssertion, got {other:?}"),
