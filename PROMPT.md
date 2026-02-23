@@ -39,6 +39,18 @@ Do NOT triage other beads. Do NOT run `bd ready` to find more work. Do NOT explo
 The sequence after closing is: `blacksmith progress add --bead-id <id> --stdin` -> run `blacksmith finish` -> STOP.
 Each session handles exactly ONE bead. The loop script handles picking the next one.
 
+### Rule D: RETRY BUDGET — stop after 5 failed attempts of the same approach.
+If you try the same approach (edit a file, run a command, check the result) and it fails **5 times**, STOP. Do not keep looping. Instead:
+
+1. Revert your changes: `git checkout -- .`
+2. Mark the failure: `bd update <id> --status=open --notes="[FAILED-ATTEMPT] <YYYY-MM-DD> retry-budget-exceeded: <brief description of the loop>"`
+3. Record a progress entry describing what you tried and why it kept failing
+4. Exit the session cleanly
+
+**What counts as "the same approach":** Editing the same file or set of files to fix the same error, then re-running the same command and getting the same (or similar) failure. Minor variations (e.g., tweaking a value by 1) still count as the same approach.
+
+**What to do instead of retrying:** If your first 3 attempts haven't converged on a fix, step back and reconsider. Read error messages carefully, check upstream callers, or look for a fundamentally different approach. If no alternative exists, bail out — the next session (or a human) can take a fresh look.
+
 ---
 
 ## Context Loading
