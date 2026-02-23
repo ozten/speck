@@ -7,7 +7,7 @@ use crate::context::ServiceContext;
 use crate::plan::conversation::ConversationLoop;
 use crate::plan::reconcile::{self, ReconciliationResult};
 use crate::plan::signal::{
-    self, ClassificationResult, SignalType as PlanSignalType,
+    self, ClassificationResult, PlanCheck, SignalType as PlanSignalType,
     VerificationStrategy as PlanVerificationStrategy,
 };
 use crate::plan::survey::{broad_survey, SurveyResult};
@@ -194,24 +194,32 @@ fn map_signal_type(plan_signal: &PlanSignalType) -> SignalType {
     }
 }
 
+/// Convert a plan-level `PlanCheck` to a spec-level `VerificationCheck`.
+fn plan_check_to_verification(check: PlanCheck) -> VerificationCheck {
+    match check {
+        PlanCheck::CommandOutput { command, expected } => {
+            VerificationCheck::CommandOutput { command, expected }
+        }
+        PlanCheck::TestSuite { command, expected } => {
+            VerificationCheck::TestSuite { command, expected }
+        }
+        PlanCheck::Custom { description } => VerificationCheck::Custom { description },
+    }
+}
+
 /// Map a plan verification strategy to a spec verification strategy.
 fn map_verification_strategy(plan_strategy: PlanVerificationStrategy) -> VerificationStrategy {
     match plan_strategy {
         PlanVerificationStrategy::DirectAssertion { checks } => {
             VerificationStrategy::DirectAssertion {
-                checks: checks
-                    .into_iter()
-                    .map(|description| VerificationCheck::Custom { description })
-                    .collect(),
+                checks: checks.into_iter().map(plan_check_to_verification).collect(),
             }
         }
         PlanVerificationStrategy::StructuralDecomposition { sub_assertions } => {
             VerificationStrategy::DirectAssertion {
                 checks: sub_assertions
                     .into_iter()
-                    .map(|sa| VerificationCheck::Custom {
-                        description: format!("{}: {}", sa.description, sa.check),
-                    })
+                    .map(|sa| plan_check_to_verification(sa.check))
                     .collect(),
             }
         }
@@ -319,7 +327,7 @@ fn print_classification(task_spec: &TaskSpec) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plan::signal::{SubAssertion, VerificationStrategy as PlanVS};
+    use crate::plan::signal::{PlanCheck, SubAssertion, VerificationStrategy as PlanVS};
     use std::collections::HashMap;
 
     #[test]
@@ -411,13 +419,24 @@ mod tests {
 
     #[test]
     fn map_strategy_direct_assertion() {
-        let plan_strategy =
-            PlanVS::DirectAssertion { checks: vec!["check1".into(), "check2".into()] };
+        let plan_strategy = PlanVS::DirectAssertion {
+            checks: vec![
+                PlanCheck::CommandOutput { command: "ls".into(), expected: "file.txt".into() },
+                PlanCheck::Custom { description: "check2".into() },
+            ],
+        };
         let spec_strategy = map_verification_strategy(plan_strategy);
         match spec_strategy {
             VerificationStrategy::DirectAssertion { checks } => {
                 assert_eq!(checks.len(), 2);
-                assert_eq!(checks[0], VerificationCheck::Custom { description: "check1".into() });
+                assert_eq!(
+                    checks[0],
+                    VerificationCheck::CommandOutput {
+                        command: "ls".into(),
+                        expected: "file.txt".into(),
+                    }
+                );
+                assert_eq!(checks[1], VerificationCheck::Custom { description: "check2".into() });
             }
             other => panic!("expected DirectAssertion, got {other:?}"),
         }
@@ -428,7 +447,7 @@ mod tests {
         let plan_strategy = PlanVS::StructuralDecomposition {
             sub_assertions: vec![SubAssertion {
                 description: "ordered".into(),
-                check: "assert sorted".into(),
+                check: PlanCheck::Custom { description: "assert sorted".into() },
             }],
         };
         let spec_strategy = map_verification_strategy(plan_strategy);
@@ -437,7 +456,7 @@ mod tests {
                 assert_eq!(checks.len(), 1);
                 assert_eq!(
                     checks[0],
-                    VerificationCheck::Custom { description: "ordered: assert sorted".into() }
+                    VerificationCheck::Custom { description: "assert sorted".into() }
                 );
             }
             other => panic!("expected DirectAssertion, got {other:?}"),
@@ -473,7 +492,9 @@ mod tests {
         let spec = build_task_spec(
             "add CSV export",
             &PlanSignalType::Clear,
-            PlanVS::DirectAssertion { checks: vec!["CLI exports CSV".into()] },
+            PlanVS::DirectAssertion {
+                checks: vec![PlanCheck::Custom { description: "CLI exports CSV".into() }],
+            },
         );
         assert_eq!(spec.title, "add CSV export");
         assert_eq!(spec.requirement, Some("add CSV export".into()));
@@ -488,7 +509,10 @@ mod tests {
             "test req",
             &PlanSignalType::FuzzyButConstrainable,
             PlanVS::StructuralDecomposition {
-                sub_assertions: vec![SubAssertion { description: "d".into(), check: "c".into() }],
+                sub_assertions: vec![SubAssertion {
+                    description: "d".into(),
+                    check: PlanCheck::Custom { description: "c".into() },
+                }],
             },
         );
         print_classification(&spec);

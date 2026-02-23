@@ -20,13 +20,42 @@ pub enum SignalType {
     InternalLogic,
 }
 
+/// A structured verification check from the LLM.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "check_type")]
+pub enum PlanCheck {
+    /// Run a command and check its output.
+    #[serde(rename = "command_output")]
+    CommandOutput {
+        /// The command to execute.
+        command: String,
+        /// What the output should contain or match.
+        expected: String,
+    },
+    /// Run the project's test suite (or a subset).
+    #[serde(rename = "test_suite")]
+    TestSuite {
+        /// The test command to run.
+        command: String,
+        /// Expected result (e.g. "all tests pass").
+        expected: String,
+    },
+    /// Manual/custom review check.
+    #[serde(rename = "custom")]
+    Custom {
+        /// Human-readable description of what to check.
+        description: String,
+    },
+}
+
 /// A single clear sub-assertion decomposed from a fuzzy requirement.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubAssertion {
     /// Human-readable description of what to check.
     pub description: String,
     /// The concrete check to perform.
-    pub check: String,
+    #[serde(flatten)]
+    pub check: PlanCheck,
 }
 
 /// The verification strategy proposed for a requirement.
@@ -35,7 +64,7 @@ pub enum VerificationStrategy {
     /// Direct assertion with specific checks (for clear signals).
     DirectAssertion {
         /// The concrete checks to run.
-        checks: Vec<String>,
+        checks: Vec<PlanCheck>,
     },
     /// Decomposition into clear structural sub-assertions (for fuzzy signals).
     StructuralDecomposition {
@@ -110,9 +139,14 @@ Classify the signal as one of:
 3. "internal" - Depends on internal logic at a specific code point
 4. "pushback" - Requirement is under-specified, needs clarification
 
-Respond with a JSON object:
-- For "clear": {{"type": "clear", "checks": ["check1", "check2"]}}
-- For "fuzzy": {{"type": "fuzzy", "sub_assertions": [{{"description": "...", "check": "..."}}, ...]}}
+Respond with a JSON object. Each check must be a structured object with a "check_type" field:
+- check_type "command_output": run a shell command and verify output. Fields: "check_type", "command", "expected".
+- check_type "test_suite": run a test suite or subset. Fields: "check_type", "command", "expected".
+- check_type "custom": manual review. Fields: "check_type", "description".
+
+Response formats:
+- For "clear": {{"type": "clear", "checks": [{{"check_type": "command_output", "command": "...", "expected": "..."}}, ...]}}
+- For "fuzzy": {{"type": "fuzzy", "sub_assertions": [{{"description": "...", "check_type": "command_output", "command": "...", "expected": "..."}}, ...]}}
 - For "internal": {{"type": "internal", "approach": "refactor"|"trace", "description": "..."}}
 - For "pushback": {{"type": "pushback", "reason": "..."}}
 
@@ -123,7 +157,8 @@ Respond ONLY with the JSON object, no other text."#
 fn parse_classification_response(
     text: &str,
 ) -> Result<ClassificationResult, Box<dyn std::error::Error + Send + Sync>> {
-    let value: serde_json::Value = serde_json::from_str(text.trim())?;
+    let json_str = super::extract_json(text);
+    let value: serde_json::Value = serde_json::from_str(json_str)?;
 
     let signal_type = value
         .get("type")
@@ -137,7 +172,16 @@ fn parse_classification_response(
                 .and_then(|c| c.as_array())
                 .ok_or("missing 'checks' field for clear signal")?
                 .iter()
-                .filter_map(|v| v.as_str().map(String::from))
+                .map(|v| {
+                    if let Some(s) = v.as_str() {
+                        // Plain string fallback: wrap as Custom
+                        PlanCheck::Custom { description: s.to_string() }
+                    } else {
+                        // Try structured deserialization; fall back to Custom on failure
+                        serde_json::from_value::<PlanCheck>(v.clone())
+                            .unwrap_or_else(|_| PlanCheck::Custom { description: v.to_string() })
+                    }
+                })
                 .collect();
             Ok(ClassificationResult::Classified {
                 signal_type: SignalType::Clear,
@@ -153,7 +197,14 @@ fn parse_classification_response(
                 .map(|v| {
                     let description =
                         v.get("description").and_then(|d| d.as_str()).unwrap_or("").to_string();
-                    let check = v.get("check").and_then(|c| c.as_str()).unwrap_or("").to_string();
+                    // Try to deserialize the flattened PlanCheck from the same object
+                    let check =
+                        serde_json::from_value::<PlanCheck>(v.clone()).unwrap_or_else(|_| {
+                            // Fallback: use legacy "check" string field or the whole value as Custom
+                            let fallback =
+                                v.get("check").and_then(|c| c.as_str()).unwrap_or("").to_string();
+                            PlanCheck::Custom { description: fallback }
+                        });
                     SubAssertion { description, check }
                 })
                 .collect();
@@ -238,7 +289,7 @@ mod tests {
     #[tokio::test]
     async fn classifies_clear_signal() {
         let llm = llm_from_response(
-            r#"{"type": "clear", "checks": ["CLI --help lists new subcommand", "Exit code is 0"]}"#,
+            r#"{"type": "clear", "checks": [{"check_type": "command_output", "command": "cargo run -- --help", "expected": "lists new subcommand"}, {"check_type": "command_output", "command": "cargo run -- --help; echo $?", "expected": "0"}]}"#,
         );
 
         let result = classify(
@@ -254,7 +305,16 @@ mod tests {
             ClassificationResult::Classified {
                 signal_type: SignalType::Clear,
                 strategy: VerificationStrategy::DirectAssertion {
-                    checks: vec!["CLI --help lists new subcommand".into(), "Exit code is 0".into(),],
+                    checks: vec![
+                        PlanCheck::CommandOutput {
+                            command: "cargo run -- --help".into(),
+                            expected: "lists new subcommand".into(),
+                        },
+                        PlanCheck::CommandOutput {
+                            command: "cargo run -- --help; echo $?".into(),
+                            expected: "0".into(),
+                        },
+                    ],
                 },
             }
         );
@@ -263,7 +323,7 @@ mod tests {
     #[tokio::test]
     async fn classifies_fuzzy_signal() {
         let llm = llm_from_response(
-            r#"{"type": "fuzzy", "sub_assertions": [{"description": "Events are in date order", "check": "assert timestamps are monotonically increasing"}, {"description": "Each event renders title", "check": "assert each event node contains a title element"}]}"#,
+            r#"{"type": "fuzzy", "sub_assertions": [{"description": "Events are in date order", "check_type": "command_output", "command": "cargo test test_ordering", "expected": "timestamps are monotonically increasing"}, {"description": "Each event renders title", "check_type": "custom", "description": "assert each event node contains a title element"}]}"#,
         );
 
         let result = classify(
@@ -283,8 +343,17 @@ mod tests {
                 assert_eq!(sub_assertions.len(), 2);
                 assert_eq!(sub_assertions[0].description, "Events are in date order");
                 assert_eq!(
+                    sub_assertions[0].check,
+                    PlanCheck::CommandOutput {
+                        command: "cargo test test_ordering".into(),
+                        expected: "timestamps are monotonically increasing".into(),
+                    }
+                );
+                assert_eq!(
                     sub_assertions[1].check,
-                    "assert each event node contains a title element"
+                    PlanCheck::Custom {
+                        description: "assert each event node contains a title element".into(),
+                    }
                 );
             }
             other => panic!("expected fuzzy classification, got {other:?}"),
@@ -391,7 +460,31 @@ mod tests {
     }
 
     #[test]
-    fn parse_clear_signal() {
+    fn parse_clear_signal_structured() {
+        let json = r#"{"type": "clear", "checks": [{"check_type": "command_output", "command": "ls", "expected": "file.txt"}, {"check_type": "test_suite", "command": "cargo test", "expected": "all pass"}]}"#;
+        let result = parse_classification_response(json).unwrap();
+        assert_eq!(
+            result,
+            ClassificationResult::Classified {
+                signal_type: SignalType::Clear,
+                strategy: VerificationStrategy::DirectAssertion {
+                    checks: vec![
+                        PlanCheck::CommandOutput {
+                            command: "ls".into(),
+                            expected: "file.txt".into(),
+                        },
+                        PlanCheck::TestSuite {
+                            command: "cargo test".into(),
+                            expected: "all pass".into(),
+                        },
+                    ],
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn parse_clear_signal_plain_string_fallback() {
         let json = r#"{"type": "clear", "checks": ["check1", "check2"]}"#;
         let result = parse_classification_response(json).unwrap();
         assert_eq!(
@@ -399,7 +492,10 @@ mod tests {
             ClassificationResult::Classified {
                 signal_type: SignalType::Clear,
                 strategy: VerificationStrategy::DirectAssertion {
-                    checks: vec!["check1".into(), "check2".into()],
+                    checks: vec![
+                        PlanCheck::Custom { description: "check1".into() },
+                        PlanCheck::Custom { description: "check2".into() },
+                    ],
                 },
             }
         );
