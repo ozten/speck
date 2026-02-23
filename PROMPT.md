@@ -14,6 +14,8 @@ Every time you are about to call a tool, ask: "Is there another independent call
 - Session end: `Bash(cargo clippy --fix --allow-dirty)` + `Bash(cargo test --release)` → ONE turn (if they don't depend on each other's output)
 - Reading multiple related files: `Read config.rs` + `Read main.rs` → ONE turn
 
+**General principle:** Before every tool call, ask yourself: "Can I issue another independent tool call right now?" If yes, emit both in the SAME message. When reading or searching multiple files, issue all independent tool calls in a single response — never sequentially.
+
 **A session with ZERO parallel calls is a failure.** Target at least 5 turns with 2+ parallel calls per session.
 
 ### Rule B: NEVER emit a text-only turn. Every assistant message MUST include at least one tool call.
@@ -80,6 +82,7 @@ For the selected task (e.g., bd-X):
 3. **Implement**: Complete the task fully
    - Only read files you need to modify — architecture is in MEMORY.md
    - Follow existing code patterns (see MEMORY.md for architecture and testing conventions)
+   - **Parallel calls (Rule A):** When you need to read/grep multiple files, batch them into ONE turn. Example: `Read(mod.rs)` + `Read(lib.rs)` + `Grep("fn foo")` → ONE turn, THREE tool calls.
 
 4. **Verify** (use parallel calls per Rule A):
 
