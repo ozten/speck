@@ -1,10 +1,10 @@
 //! `speck plan` command.
 
 use std::fmt::Write as _;
-use std::path::PathBuf;
+use std::path::Path;
 
 use crate::context::ServiceContext;
-use crate::plan::conversation::ConversationLoop;
+use crate::plan::conversation::{self, AnalysisResult};
 use crate::plan::reconcile::{self, ReconciliationResult};
 use crate::plan::signal::{
     self, ClassificationResult, PlanCheck, SignalType as PlanSignalType,
@@ -16,19 +16,18 @@ use crate::store::SpecStore;
 
 /// Execute the `plan` command.
 ///
-/// Runs the Pass 1 broad codebase survey, then Pass 2 signal classification.
-/// The requirement can come from a positional argument or from a file via `--from`.
+/// Reads a spec document from `doc_path`, then runs all analysis passes
+/// non-interactively: survey, signal classification, spec analysis, and
+/// reconciliation. Writes derived `TaskSpec`s to `.speck/tasks/` and prints
+/// structured feedback to stdout.
 ///
 /// # Errors
 ///
-/// Returns an error string if the requirement is missing, the survey fails,
-/// or signal classification fails.
-pub fn run(
-    ctx: &ServiceContext,
-    requirement: Option<&str>,
-    from: Option<&PathBuf>,
-) -> Result<(), String> {
-    let requirement_text = resolve_requirement(requirement, from)?;
+/// Returns an error string if reading the doc fails, any analysis pass fails,
+/// or spec persistence fails.
+pub fn run(ctx: &ServiceContext, doc_path: &Path) -> Result<(), String> {
+    let requirement_text = std::fs::read_to_string(doc_path)
+        .map_err(|e| format!("failed to read spec document '{}': {e}", doc_path.display()))?;
 
     let root =
         std::env::current_dir().map_err(|e| format!("failed to get current directory: {e}"))?;
@@ -38,8 +37,8 @@ pub fn run(
         .build()
         .map_err(|e| format!("failed to create async runtime: {e}"))?;
 
+    // Pass 1: Broad codebase survey
     let survey = rt.block_on(broad_survey(ctx, &root, &requirement_text))?;
-
     print_survey_result(&survey);
 
     // Pass 2: Signal classification
@@ -48,7 +47,7 @@ pub fn run(
         .block_on(signal::classify(ctx.llm.as_ref(), &requirement_text, &codebase_context))
         .map_err(|e| format!("signal classification failed: {e}"))?;
 
-    let initial_specs = match classification {
+    let mut specs = match classification {
         ClassificationResult::Classified { signal_type, strategy } => {
             let task_spec = build_task_spec(&requirement_text, &signal_type, strategy);
             print_classification(&task_spec);
@@ -56,8 +55,6 @@ pub fn run(
         }
         ClassificationResult::PushbackRequired { reason } => {
             eprintln!("Note: pushback required — {reason}");
-            // Create a minimal spec with empty verification so the conversation loop
-            // can refine it interactively.
             let task_spec = TaskSpec {
                 id: String::new(),
                 title: requirement_text.clone(),
@@ -71,27 +68,18 @@ pub fn run(
         }
     };
 
-    // Pass 3: Interactive conversation loop
-    let stdin = std::io::stdin().lock();
-    let stdout = std::io::stdout();
-    let conv = ConversationLoop::new(initial_specs, stdin, stdout);
-    let mut refined_specs =
-        rt.block_on(conv.run(ctx)).map_err(|e| format!("conversation loop failed: {e}"))?;
+    // Pass 2.5a: Single-pass spec analysis (non-interactive feedback)
+    let analysis = rt
+        .block_on(conversation::analyze_specs(ctx, &specs))
+        .map_err(|e| format!("spec analysis failed: {e}"))?;
 
-    println!("\n=== Refined Task Specs ({}) ===", refined_specs.len());
-    for spec in &refined_specs {
-        println!("  {} — {:?} — {:?}", spec.title, spec.signal_type, spec.verification);
-    }
-
-    // Pass 2.5: Reconciliation
+    // Pass 2.5b: Reconciliation
     let reconciliation = rt
-        .block_on(reconcile::reconcile(ctx, &refined_specs))
+        .block_on(reconcile::reconcile(ctx, &specs))
         .map_err(|e| format!("reconciliation failed: {e}"))?;
 
-    print_reconciliation(&reconciliation);
-
     // Assign IDs to specs that don't have one yet
-    for spec in &mut refined_specs {
+    for spec in &mut specs {
         if spec.id.is_empty() {
             spec.id = ctx.id_gen.generate_id();
         }
@@ -100,34 +88,61 @@ pub fn run(
     // Persist final specs to the store
     let store_root = store_root()?;
     let store = SpecStore::new(ctx, &store_root);
-    for spec in &refined_specs {
+    for spec in &specs {
         store.save_task_spec(spec)?;
     }
 
-    // Print summary
-    println!("\n=== Saved Specs ===");
-    for spec in &refined_specs {
-        println!("  {} — {}", spec.id, spec.title);
-    }
-    println!("{} spec(s) saved to {}", refined_specs.len(), store_root.display());
+    // Print structured output
+    print_structured_output(&specs, &analysis, &reconciliation, &store_root);
 
     Ok(())
 }
 
-/// Resolve the requirement text from either a positional argument or a file.
-fn resolve_requirement(
-    requirement: Option<&str>,
-    from: Option<&PathBuf>,
-) -> Result<String, String> {
-    match (requirement, from) {
-        (Some(text), _) => Ok(text.to_string()),
-        (None, Some(path)) => std::fs::read_to_string(path)
-            .map_err(|e| format!("failed to read requirement file '{}': {e}", path.display())),
-        (None, None) => {
-            Err("requirement text is required: provide it as an argument or use --from <file>"
-                .into())
+/// Print the full structured output suitable for LLM consumption.
+fn print_structured_output(
+    specs: &[TaskSpec],
+    analysis: &AnalysisResult,
+    reconciliation: &ReconciliationResult,
+    store_root: &Path,
+) {
+    // --- Derived Tasks ---
+    println!("\n=== Derived Tasks ({}) ===", specs.len());
+    for (i, spec) in specs.iter().enumerate() {
+        println!("{}. {} — {}", i + 1, spec.id, spec.title);
+        println!("   Signal: {:?}", spec.signal_type);
+        println!("   Verification: {:?}", spec.verification);
+    }
+
+    // --- Feedback ---
+    println!("\n=== Feedback ===");
+    println!("{}", analysis.summary);
+
+    if analysis.questions.is_empty() {
+        println!("\nAll specs have clear verification strategies.");
+    } else {
+        for (i, q) in analysis.questions.iter().enumerate() {
+            println!("\nQ{} [task {}]: {}", i + 1, q.task_id, q.description);
+            for (j, opt) in q.options.iter().enumerate() {
+                #[allow(clippy::cast_possible_truncation)]
+                let label = char::from(b'a' + j as u8);
+                let rec = q.recommended.map_or(String::new(), |r| {
+                    if r == j {
+                        " (recommended)".into()
+                    } else {
+                        String::new()
+                    }
+                });
+                println!("  {label}) {opt}{rec}");
+            }
         }
     }
+
+    // --- Reconciliation ---
+    print_reconciliation(reconciliation);
+
+    // --- Summary ---
+    println!("\n=== Summary ===");
+    println!("{} spec(s) saved to {}", specs.len(), store_root.display());
 }
 
 /// Print a `SurveyResult` to stdout in a human-readable format.
@@ -266,9 +281,9 @@ fn build_task_spec(
 }
 
 /// Resolve the store root for `.speck/` persistence.
-fn store_root() -> Result<PathBuf, String> {
+fn store_root() -> Result<std::path::PathBuf, String> {
     if let Ok(val) = std::env::var("SPECK_STORE") {
-        return Ok(PathBuf::from(val));
+        return Ok(std::path::PathBuf::from(val));
     }
     let cwd =
         std::env::current_dir().map_err(|e| format!("failed to get current directory: {e}"))?;
@@ -334,40 +349,6 @@ mod tests {
     use super::*;
     use crate::plan::signal::{PlanCheck, SubAssertion, VerificationStrategy as PlanVS};
     use std::collections::HashMap;
-
-    #[test]
-    fn resolve_requirement_from_arg() {
-        let text = resolve_requirement(Some("add auth"), None).unwrap();
-        assert_eq!(text, "add auth");
-    }
-
-    #[test]
-    fn resolve_requirement_from_file() {
-        let dir = std::env::temp_dir().join("speck_plan_test_req");
-        std::fs::create_dir_all(&dir).unwrap();
-        let file = dir.join("req.txt");
-        std::fs::write(&file, "requirement from file").unwrap();
-        let text = resolve_requirement(None, Some(&file)).unwrap();
-        assert_eq!(text, "requirement from file");
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn resolve_requirement_missing() {
-        let err = resolve_requirement(None, None).unwrap_err();
-        assert!(err.contains("requirement text is required"));
-    }
-
-    #[test]
-    fn resolve_requirement_arg_takes_precedence() {
-        let dir = std::env::temp_dir().join("speck_plan_test_prec");
-        std::fs::create_dir_all(&dir).unwrap();
-        let file = dir.join("req.txt");
-        std::fs::write(&file, "from file").unwrap();
-        let text = resolve_requirement(Some("from arg"), Some(&file)).unwrap();
-        assert_eq!(text, "from arg");
-        std::fs::remove_dir_all(&dir).ok();
-    }
 
     #[test]
     fn print_survey_result_formats_output() {

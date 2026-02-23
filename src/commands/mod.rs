@@ -54,9 +54,7 @@ pub fn dispatch(command: &Command) -> Result<(), String> {
 /// Dispatch a command with the given service context.
 fn dispatch_with_context(command: &Command, ctx: &ServiceContext) -> Result<(), String> {
     match command {
-        Command::Plan { ref requirement, ref from } => {
-            plan::run(ctx, requirement.as_deref(), from.as_ref())
-        }
+        Command::Plan { ref doc } => plan::run(ctx, doc),
         Command::Validate { spec_id, all } => {
             validate::run_with_context(ctx, spec_id.as_deref(), *all, None)
         }
@@ -64,7 +62,7 @@ fn dispatch_with_context(command: &Command, ctx: &ServiceContext) -> Result<(), 
         Command::Show { id } => show::run(id.as_deref()),
         Command::Status => status::run(),
         Command::Deps => deps::run(),
-        Command::Sync { target, dry_run } => sync::run(target, *dry_run),
+        Command::Sync { target, dry_run } => sync::run_with_context(ctx, target, *dry_run, None),
     }
 }
 

@@ -8,11 +8,15 @@ fn run_speck(args: &[&str]) -> std::process::Output {
 }
 
 #[test]
-fn plan_subcommand_without_requirement_errors() {
+fn plan_subcommand_without_doc_errors() {
     let output = run_speck(&["plan"]);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(!output.status.success());
-    assert!(stderr.contains("requirement text is required"));
+    // clap reports missing required argument
+    assert!(
+        stderr.contains("DOC") || stderr.contains("required"),
+        "expected missing-arg error.\nstderr: {stderr}"
+    );
 }
 
 #[test]
@@ -89,16 +93,20 @@ fn plan_with_cassette_produces_specs() {
     let cassette_path =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test_fixtures/plan_session.yaml");
 
+    // Create a temp doc file for the plan command
+    let doc_dir = std::env::temp_dir().join("speck_cli_plan_test");
+    std::fs::create_dir_all(&doc_dir).unwrap();
+    let doc_path = doc_dir.join("spec.md");
+    std::fs::write(&doc_path, "Add user authentication").unwrap();
+
     let bin = env!("CARGO_BIN_EXE_speck");
     let output = Command::new(bin)
-        .args(["plan", "Add user authentication"])
+        .args(["plan", doc_path.to_str().unwrap()])
         .env("SPECK_REPLAY", &cassette_path)
         .env("SPECK_STORE", "/tmp/speck-plan-test-store")
-        .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        .spawn()
-        .and_then(|child| child.wait_with_output())
+        .output()
         .expect("failed to run speck binary");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -121,13 +129,12 @@ fn plan_with_cassette_produces_specs() {
         "should print reconciliation results.\nstdout: {stdout}"
     );
 
-    // Verify conversation loop completed
-    assert!(
-        stdout.contains("All task specs have verification strategies"),
-        "conversation loop should complete.\nstdout: {stdout}"
-    );
+    // Verify non-interactive feedback
+    assert!(stdout.contains("Feedback"), "should print feedback section.\nstdout: {stdout}");
 
     // Verify specs were saved
-    assert!(stdout.contains("Saved Specs"), "should print saved specs.\nstdout: {stdout}");
+    assert!(stdout.contains("Summary"), "should print summary section.\nstdout: {stdout}");
     assert!(stdout.contains("TASK-PLAN-1"), "should show generated spec ID.\nstdout: {stdout}");
+
+    let _ = std::fs::remove_dir_all(&doc_dir);
 }
