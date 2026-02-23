@@ -21,6 +21,11 @@ target
 #.idea/
 
 
+# Environment secrets
+.env
+
 # Added by cargo
 
 /target
+.blacksmith/*
+!.blacksmith/config.toml

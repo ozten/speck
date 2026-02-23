@@ -1,0 +1,58 @@
+# Blacksmith configuration
+# See documentation for all available options.
+
+[agent]
+command = "claude"
+args = ["-p", "{prompt}", "--dangerously-skip-permissions", "--verbose", "--output-format", "stream-json"]
+prompt_via = "arg"
+
+[session]
+max_iterations = 100
+
+[storage]
+compress_after = 5
+retention = "last-50"
+
+[workers]
+max = 1
+
+[improvements]
+analyze_every = 1       # Spawn analysis agent every N completed sessions (0 = disabled)
+analyze_sessions = 1    # Number of recent sessions to include in the analysis prompt
+
+[quality_gates]
+check = ["cargo check --release"]
+test = ["cargo test --release"]
+lint = ["cargo clippy --fix --allow-dirty"]
+format = ["cargo fmt --check"]
+
+# Metrics targets for regression detection.
+# Based on best session (session 2): 23% narration, $0.59 cost.
+# Thresholds: narration_pct_max=25, parallel_pct_min=15, cost_per_session_max=1.00
+[metrics.targets]
+streak_threshold = 3
+
+[[metrics.targets.rules]]
+kind = "turns.narration_only"
+compare = "pct_of"
+relative_to = "turns.total"
+threshold = 25.0
+direction = "below"
+label = "Narration %"
+
+[[metrics.targets.rules]]
+kind = "turns.parallel"
+compare = "pct_of"
+relative_to = "turns.total"
+threshold = 15.0
+direction = "above"
+label = "Parallel %"
+
+# Cost target: track that cost data is being logged (pct_sessions).
+# Absolute cost threshold ($1.00/session) checked via blacksmith metrics status.
+[[metrics.targets.rules]]
+kind = "cost.estimate_usd"
+compare = "pct_sessions"
+threshold = 99.0
+direction = "above"
+label = "Cost tracking health"
