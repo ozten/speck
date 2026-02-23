@@ -83,3 +83,51 @@ fn invalid_subcommand_exits_with_error() {
     assert!(!output.status.success());
     assert!(stderr.contains("unrecognized subcommand"));
 }
+
+#[test]
+fn plan_with_cassette_produces_specs() {
+    let cassette_path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test_fixtures/plan_session.yaml");
+
+    let bin = env!("CARGO_BIN_EXE_speck");
+    let output = Command::new(bin)
+        .args(["plan", "Add user authentication"])
+        .env("SPECK_REPLAY", &cassette_path)
+        .env("SPECK_STORE", "/tmp/speck-plan-test-store")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|child| child.wait_with_output())
+        .expect("failed to run speck binary");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(output.status.success(), "plan command failed.\nstdout: {stdout}\nstderr: {stderr}");
+
+    // Verify survey output
+    assert!(stdout.contains("Routing Table"), "should print routing table.\nstdout: {stdout}");
+
+    // Verify signal classification output
+    assert!(
+        stdout.contains("Signal Classification"),
+        "should print signal classification.\nstdout: {stdout}"
+    );
+
+    // Verify reconciliation output
+    assert!(
+        stdout.contains("Reconciliation"),
+        "should print reconciliation results.\nstdout: {stdout}"
+    );
+
+    // Verify conversation loop completed
+    assert!(
+        stdout.contains("All task specs have verification strategies"),
+        "conversation loop should complete.\nstdout: {stdout}"
+    );
+
+    // Verify specs were saved
+    assert!(stdout.contains("Saved Specs"), "should print saved specs.\nstdout: {stdout}");
+    assert!(stdout.contains("TASK-PLAN-1"), "should show generated spec ID.\nstdout: {stdout}");
+}

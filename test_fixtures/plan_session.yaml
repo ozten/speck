@@ -1,0 +1,112 @@
+name: plan-integration-test
+recorded_at: '2026-01-20T14:00:00Z'
+commit: abc123test
+interactions:
+# --- Pass 1: Broad survey ---
+# 1. git.current_commit for cache check
+- seq: 0
+  port: git
+  method: current_commit
+  input: {}
+  output: abc123test
+# 2. fs.exists — cache miss
+- seq: 1
+  port: fs
+  method: exists
+  input: {}
+  output: false
+# --- Map generation (no cache) ---
+# 3. clock.now
+- seq: 2
+  port: clock
+  method: now
+  input: {}
+  output: '2026-01-20T14:00:00Z'
+# 4. git.current_commit (called again by generator)
+- seq: 3
+  port: git
+  method: current_commit
+  input: {}
+  output: abc123test
+# 5. git.list_files
+- seq: 4
+  port: git
+  method: list_files
+  input: {}
+  output:
+  - src/lib.rs
+  - src/main.rs
+# 6. fs.read_to_string — src/lib.rs
+- seq: 5
+  port: fs
+  method: read_to_string
+  input: {}
+  output: "pub fn run() {}\n"
+# 7. fs.read_to_string — src/main.rs
+- seq: 6
+  port: fs
+  method: read_to_string
+  input: {}
+  output: "fn main() { run(); }\n"
+# 8. fs.write — save cached codebase map
+- seq: 7
+  port: fs
+  method: write
+  input: {}
+  output: null
+# 9. llm.complete — survey analysis
+- seq: 8
+  port: llm
+  method: complete
+  input: {}
+  output:
+    ok:
+      text: '{"routing_table": {"src": "Application entry point and core logic"}, "cross_cutting_concerns": ["error handling"], "foundational_gaps": []}'
+      prompt_tokens: 500
+      completion_tokens: 100
+# --- Pass 2: Signal classification ---
+# 10. llm.complete — classification
+- seq: 9
+  port: llm
+  method: complete
+  input: {}
+  output:
+    ok:
+      text: '{"type": "clear", "checks": ["CLI outputs expected message", "Exit code is 0"]}'
+      prompt_tokens: 300
+      completion_tokens: 80
+# --- Pass 3: Conversation loop ---
+# 11. llm.complete — analysis (all resolved, empty questions)
+- seq: 10
+  port: llm
+  method: complete
+  input: {}
+  output:
+    ok:
+      text: '{"summary": "All task specs have clear verification strategies.", "questions": []}'
+      prompt_tokens: 200
+      completion_tokens: 50
+# --- Pass 2.5: Reconciliation ---
+# 12. llm.complete — reconciliation
+- seq: 11
+  port: llm
+  method: complete
+  input: {}
+  output:
+    ok:
+      text: '{"merges": [], "extractions": [], "reorders": []}'
+      prompt_tokens: 300
+      completion_tokens: 50
+# --- Spec persistence ---
+# 13. id_gen.generate_id — assign spec ID
+- seq: 12
+  port: id_gen
+  method: generate_id
+  input: {}
+  output: TASK-PLAN-1
+# 14. fs.write — save task spec to store
+- seq: 13
+  port: fs
+  method: write
+  input: {}
+  output: null

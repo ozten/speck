@@ -19,13 +19,20 @@ use crate::context::ServiceContext;
 /// When `SPECK_REC=true` is set, all port interactions are recorded to
 /// per-port cassette files in `.speck/cassettes/<timestamp>/`.
 ///
+/// When `SPECK_REPLAY=<path>` is set, all port interactions are replayed
+/// from the given monolithic cassette file.
+///
 /// # Errors
 ///
 /// Returns an error string if the selected command handler fails.
 pub fn dispatch(command: &Command) -> Result<(), String> {
     let recording_enabled = env::var("SPECK_REC").map(|v| v == "true").unwrap_or(false);
+    let replay_path = env::var("SPECK_REPLAY").ok();
 
-    let (ctx, session) = if recording_enabled {
+    let (ctx, session) = if let Some(path) = &replay_path {
+        let ctx = ServiceContext::replaying(std::path::Path::new(path))?;
+        (ctx, None)
+    } else if recording_enabled {
         let (ctx, session) = ServiceContext::recording()?;
         (ctx, Some(session))
     } else {
