@@ -76,7 +76,36 @@ impl FileSystem for RecordingFileSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::live::filesystem::LiveFileSystem;
+
+    struct FakeFileSystem;
+
+    impl FileSystem for FakeFileSystem {
+        fn read_to_string(
+            &self,
+            _path: &Path,
+        ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            Ok("fake content".into())
+        }
+
+        fn write(
+            &self,
+            _path: &Path,
+            _contents: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Ok(())
+        }
+
+        fn exists(&self, _path: &Path) -> bool {
+            true
+        }
+
+        fn list_dir(
+            &self,
+            _path: &Path,
+        ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(vec!["file.txt".into()])
+        }
+    }
 
     #[test]
     fn records_exists_interaction() {
@@ -88,7 +117,7 @@ mod tests {
 
         // Scope the adapter so it's dropped before we try to unwrap
         {
-            let fs = RecordingFileSystem::new(Box::new(LiveFileSystem), Arc::clone(&recorder));
+            let fs = RecordingFileSystem::new(Box::new(FakeFileSystem), Arc::clone(&recorder));
             let _ = fs.exists(Path::new("/tmp"));
         }
 

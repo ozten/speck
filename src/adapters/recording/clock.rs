@@ -32,7 +32,15 @@ impl Clock for RecordingClock {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::live::clock::LiveClock;
+    use chrono::TimeZone;
+
+    struct FakeClock;
+
+    impl Clock for FakeClock {
+        fn now(&self) -> DateTime<Utc> {
+            Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap()
+        }
+    }
 
     #[test]
     fn records_now_interaction() {
@@ -44,7 +52,7 @@ mod tests {
 
         // Scope the adapter so it's dropped before we try to unwrap
         {
-            let clock = RecordingClock::new(Box::new(LiveClock), Arc::clone(&recorder));
+            let clock = RecordingClock::new(Box::new(FakeClock), Arc::clone(&recorder));
             let _ = clock.now();
         }
 

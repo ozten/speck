@@ -54,7 +54,25 @@ impl GitRepo for RecordingGitRepo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::live::git::LiveGitRepo;
+
+    struct FakeGitRepo;
+
+    impl GitRepo for FakeGitRepo {
+        fn current_commit(&self) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            Ok("abc123".into())
+        }
+
+        fn diff(&self) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(String::new())
+        }
+
+        fn list_files(
+            &self,
+            _path: &Path,
+        ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(vec!["file.rs".into()])
+        }
+    }
 
     #[test]
     fn records_current_commit_interaction() {
@@ -66,7 +84,7 @@ mod tests {
 
         // Scope the adapter so it's dropped before we try to unwrap
         {
-            let git = RecordingGitRepo::new(Box::new(LiveGitRepo), Arc::clone(&recorder));
+            let git = RecordingGitRepo::new(Box::new(FakeGitRepo), Arc::clone(&recorder));
             let _ = git.current_commit();
         }
 

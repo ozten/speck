@@ -30,7 +30,14 @@ impl IdGenerator for RecordingIdGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::live::id_gen::LiveIdGenerator;
+
+    struct FakeIdGenerator;
+
+    impl IdGenerator for FakeIdGenerator {
+        fn generate_id(&self) -> String {
+            "fake-id-001".into()
+        }
+    }
 
     #[test]
     fn records_generate_id_interaction() {
@@ -43,10 +50,10 @@ mod tests {
         // Scope the adapter so it's dropped before we try to unwrap
         let id = {
             let gen =
-                RecordingIdGenerator::new(Box::new(LiveIdGenerator::new()), Arc::clone(&recorder));
+                RecordingIdGenerator::new(Box::new(FakeIdGenerator), Arc::clone(&recorder));
             gen.generate_id()
         };
-        assert!(!id.is_empty());
+        assert_eq!(id, "fake-id-001");
 
         let recorder = Arc::try_unwrap(recorder).unwrap().into_inner().unwrap();
         recorder.finish().unwrap();

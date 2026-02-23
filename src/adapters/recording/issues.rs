@@ -79,7 +79,45 @@ impl IssueTracker for RecordingIssueTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::live::issues::LiveIssueTracker;
+
+    struct FakeIssueTracker;
+
+    impl IssueTracker for FakeIssueTracker {
+        fn create_issue(
+            &self,
+            title: &str,
+            body: &str,
+        ) -> Result<Issue, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(Issue {
+                id: "fake-1".into(),
+                title: title.into(),
+                body: body.into(),
+                status: "open".into(),
+            })
+        }
+
+        fn update_issue(
+            &self,
+            id: &str,
+            title: Option<&str>,
+            _body: Option<&str>,
+            _status: Option<&str>,
+        ) -> Result<Issue, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(Issue {
+                id: id.into(),
+                title: title.unwrap_or("updated").into(),
+                body: String::new(),
+                status: "open".into(),
+            })
+        }
+
+        fn list_issues(
+            &self,
+            _status: Option<&str>,
+        ) -> Result<Vec<Issue>, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(vec![])
+        }
+    }
 
     #[test]
     fn records_create_issue_interaction() {
@@ -92,8 +130,7 @@ mod tests {
         // Scope the adapter so it's dropped before we try to unwrap
         {
             let tracker =
-                RecordingIssueTracker::new(Box::new(LiveIssueTracker), Arc::clone(&recorder));
-            // This will fail since LiveIssueTracker is a stub, but it should still record
+                RecordingIssueTracker::new(Box::new(FakeIssueTracker), Arc::clone(&recorder));
             let _ = tracker.create_issue("Test Issue", "Test body");
         }
 

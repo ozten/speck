@@ -38,7 +38,17 @@ impl ShellExecutor for RecordingShellExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::live::shell::LiveShellExecutor;
+
+    struct FakeShellExecutor;
+
+    impl ShellExecutor for FakeShellExecutor {
+        fn run(
+            &self,
+            _command: &str,
+        ) -> Result<ShellOutput, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(ShellOutput { exit_code: 0, stdout: "hello\n".into(), stderr: String::new() })
+        }
+    }
 
     #[test]
     fn records_run_interaction() {
@@ -51,7 +61,7 @@ mod tests {
         // Scope the adapter so it's dropped before we try to unwrap
         {
             let shell =
-                RecordingShellExecutor::new(Box::new(LiveShellExecutor), Arc::clone(&recorder));
+                RecordingShellExecutor::new(Box::new(FakeShellExecutor), Arc::clone(&recorder));
             let result = shell.run("echo hello");
             assert!(result.is_ok());
         }
