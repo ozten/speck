@@ -42,16 +42,50 @@ fn issue_title(spec: &TaskSpec) -> String {
     format!("[{}] {}", spec.id, spec.title)
 }
 
-/// Builds the issue body from a task spec, including acceptance criteria
-/// and dependency information.
+/// Builds the issue body from a task spec, including all structured fields
+/// needed for an agent to execute the task without reading additional files.
+///
+/// Format is designed to round-trip: the `## Verification` section uses a
+/// YAML fenced block that `speck validate` can parse back into a
+/// [`VerificationStrategy`].
 fn issue_body(spec: &TaskSpec) -> String {
     let mut body = String::new();
 
+    // Affected globs line — read by blacksmith scheduler for conflict detection.
+    if let Some(globs) = &spec.affected_globs {
+        if !globs.is_empty() {
+            let _ = writeln!(body, "affected: {}", globs.join(", "));
+            body.push('\n');
+        }
+    }
+
+    // Acceptance criteria (already present, kept as-is).
     body.push_str("## Acceptance Criteria\n");
     for criterion in &spec.acceptance_criteria {
         let _ = writeln!(body, "- {criterion}");
     }
 
+    // Module context — which modules are involved and what patterns to follow.
+    if let Some(ctx) = &spec.context {
+        if !ctx.modules.is_empty() || ctx.patterns.is_some() {
+            body.push_str("\n## Module Context\n");
+            if !ctx.modules.is_empty() {
+                let _ = writeln!(body, "Modules: {}", ctx.modules.join(", "));
+            }
+            if let Some(patterns) = &ctx.patterns {
+                let _ = writeln!(body, "Patterns: {patterns}");
+            }
+        }
+    }
+
+    // Verification checks in a parseable YAML block for round-trip use.
+    body.push_str("\n## Verification\n");
+    body.push_str("```yaml\n");
+    let yaml = serde_yaml::to_string(&spec.verification).unwrap_or_default();
+    body.push_str(&yaml);
+    body.push_str("```\n");
+
+    // Dependencies (already present, kept as-is).
     if let Some(ctx) = &spec.context {
         if !ctx.dependencies.is_empty() {
             body.push_str("\n## Dependencies\n");
@@ -205,6 +239,31 @@ mod tests {
         }
     }
 
+    fn sample_spec_full() -> TaskSpec {
+        TaskSpec {
+            id: "T-99".to_string(),
+            title: "Full spec".to_string(),
+            requirement: None,
+            context: Some(TaskContext {
+                modules: vec!["MetricsService".to_string(), "AuthService".to_string()],
+                patterns: Some("Follow existing migration conventions".to_string()),
+                dependencies: vec!["T-1".to_string()],
+            }),
+            acceptance_criteria: vec!["it works".to_string()],
+            signal_type: SignalType::Clear,
+            verification: VerificationStrategy::DirectAssertion {
+                checks: vec![VerificationCheck::TestSuite {
+                    command: "cargo test".to_string(),
+                    expected: "pass".to_string(),
+                }],
+            },
+            affected_globs: Some(vec![
+                "src/services/metrics/**".to_string(),
+                "src/lib.rs".to_string(),
+            ]),
+        }
+    }
+
     #[test]
     fn plan_creates_for_new_specs() {
         let specs = vec![sample_spec("T-1", "First task")];
@@ -262,6 +321,83 @@ mod tests {
         assert!(body.contains("## Dependencies"));
         assert!(body.contains("- T-0"));
         assert!(body.contains("- T-2"));
+    }
+
+    #[test]
+    fn issue_body_includes_affected_globs() {
+        let mut spec = sample_spec("T-1", "Task");
+        spec.affected_globs = Some(vec!["src/foo/**".to_string(), "src/bar.rs".to_string()]);
+        let body = issue_body(&spec);
+        assert!(body.contains("affected: src/foo/**, src/bar.rs"), "body was: {body}");
+    }
+
+    #[test]
+    fn issue_body_omits_affected_when_none() {
+        let spec = sample_spec("T-1", "Task");
+        let body = issue_body(&spec);
+        assert!(!body.contains("affected:"), "body was: {body}");
+    }
+
+    #[test]
+    fn issue_body_omits_affected_when_empty() {
+        let mut spec = sample_spec("T-1", "Task");
+        spec.affected_globs = Some(vec![]);
+        let body = issue_body(&spec);
+        assert!(!body.contains("affected:"), "body was: {body}");
+    }
+
+    #[test]
+    fn issue_body_includes_verification_yaml_block() {
+        let spec = sample_spec("T-1", "Task");
+        let body = issue_body(&spec);
+        assert!(body.contains("## Verification"), "body was: {body}");
+        assert!(body.contains("```yaml"), "body was: {body}");
+        assert!(body.contains("strategy: direct_assertion"), "body was: {body}");
+        assert!(body.contains("command: cargo test"), "body was: {body}");
+    }
+
+    #[test]
+    fn issue_body_verification_yaml_round_trips() {
+        use crate::spec::VerificationStrategy;
+        let spec = sample_spec("T-1", "Task");
+        let body = issue_body(&spec);
+        // Extract YAML between ```yaml and ```
+        let start = body.find("```yaml\n").expect("yaml block start") + 8;
+        let end = body[start..].find("\n```").expect("yaml block end") + start;
+        let yaml_str = &body[start..end];
+        let parsed: VerificationStrategy =
+            serde_yaml::from_str(yaml_str).expect("should parse back");
+        assert_eq!(parsed, spec.verification);
+    }
+
+    #[test]
+    fn issue_body_includes_module_context() {
+        let spec = sample_spec_full();
+        let body = issue_body(&spec);
+        assert!(body.contains("## Module Context"), "body was: {body}");
+        assert!(body.contains("Modules: MetricsService, AuthService"), "body was: {body}");
+        assert!(
+            body.contains("Patterns: Follow existing migration conventions"),
+            "body was: {body}"
+        );
+    }
+
+    #[test]
+    fn issue_body_full_spec_section_order() {
+        let spec = sample_spec_full();
+        let body = issue_body(&spec);
+        let affected_pos = body.find("affected:").expect("affected line");
+        let criteria_pos = body.find("## Acceptance Criteria").expect("criteria");
+        let module_pos = body.find("## Module Context").expect("module context");
+        let verify_pos = body.find("## Verification").expect("verification");
+        let deps_pos = body.find("## Dependencies").expect("dependencies");
+        assert!(
+            affected_pos < criteria_pos
+                && criteria_pos < module_pos
+                && module_pos < verify_pos
+                && verify_pos < deps_pos,
+            "unexpected section order in body"
+        );
     }
 
     #[test]
