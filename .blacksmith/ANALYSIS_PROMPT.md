@@ -26,6 +26,12 @@ Total completed sessions this run: {{session_count}}
 
 All session metrics you need are provided above in `{{recent_metrics}}`. Do NOT explore the filesystem, read session files, or use Explore subagents. Start analysis immediately from the provided data.
 
+**Read files directly — do NOT use Task with subagent_type Explore.** If you need to read config or prompt files, use the Read tool directly on these known paths:
+- `.blacksmith/config.toml`
+- `PROMPT.md`
+- `.beads/issues.jsonl`
+- `Cargo.toml`
+
 ## Script Efficiency Directive
 
 If you need to compute derived metrics from the provided data (e.g., averages, ratios, trends), do it in a **SINGLE comprehensive Python script** passed to Bash in one call. Do NOT make sequential Bash calls for data extraction — combine all computations into one script and run it once.
