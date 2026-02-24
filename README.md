@@ -12,14 +12,31 @@ Speck sandwiches requirements gathering and verification around the meat of prod
 - `speck deps`: list dependency relationships between specs.
 - `speck sync`: sync specs to an external tracker (e.g., beads).
 
+## Configuration
+
+```bash
+cp env.example.txt .env
+```
+
+Edit `.env` and set your Anthropic API key:
+
+```
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+The `.env` file is gitignored. You can also export the variable directly in your shell.
+
 ## Quick start
 
 ```bash
-cargo run -- plan
-cargo run -- validate --all
+cargo run -- plan "your requirement here"
 cargo run -- status
+cargo run -- show
+cargo run -- validate --all
 cargo run -- map
 ```
+
+For a full end-to-end walkthrough (plan a calculator, file issues with bd, build, validate), see [docs/walkthrough.md](docs/walkthrough.md).
 
 ## Development
 

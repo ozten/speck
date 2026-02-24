@@ -118,7 +118,11 @@ fn parse_survey_response(response_text: &str, map: &CodebaseMap) -> Result<Surve
         foundational_gaps: Vec<String>,
     }
 
-    let parsed: LlmResponse = serde_json::from_str(response_text)
+    // Parse as Value first to tolerate duplicate keys (LLMs sometimes emit them).
+    let value: serde_json::Value = serde_json::from_str(response_text.trim())
+        .map_err(|e| format!("failed to parse LLM survey response: {e}"))?;
+
+    let parsed: LlmResponse = serde_json::from_value(value)
         .map_err(|e| format!("failed to parse LLM survey response: {e}"))?;
 
     // Build dependency graph from the codebase map.

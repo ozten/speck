@@ -49,8 +49,7 @@ mod tests {
 
         // Scope the adapter so it's dropped before we try to unwrap
         let id = {
-            let gen =
-                RecordingIdGenerator::new(Box::new(FakeIdGenerator), Arc::clone(&recorder));
+            let gen = RecordingIdGenerator::new(Box::new(FakeIdGenerator), Arc::clone(&recorder));
             gen.generate_id()
         };
         assert_eq!(id, "fake-id-001");

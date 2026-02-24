@@ -225,7 +225,7 @@ fn parse_reconciliation_response(
         reorders: Vec<ReorderSuggestion>,
     }
 
-    let parsed: LlmResponse = serde_json::from_str(response)
+    let parsed: LlmResponse = serde_json::from_str(super::extract_json(response))
         .map_err(|e| format!("failed to parse LLM reconciliation response: {e}"))?;
 
     Ok(ReconciliationResult {

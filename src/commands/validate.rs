@@ -87,10 +87,45 @@ fn store_root() -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cassette::config::CassetteConfig;
+    use crate::ports::shell::{ShellExecutor, ShellOutput};
+
+    /// Shell executor that returns canned results without running real commands.
+    struct FakeShellExecutor {
+        exit_code: i32,
+    }
+
+    impl ShellExecutor for FakeShellExecutor {
+        fn run(
+            &self,
+            _command: &str,
+        ) -> Result<ShellOutput, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(ShellOutput {
+                exit_code: self.exit_code,
+                stdout: String::new(),
+                stderr: String::new(),
+            })
+        }
+    }
+
+    fn test_context() -> ServiceContext {
+        let mut ctx = ServiceContext::replaying_from(&CassetteConfig::panic_on_unspecified())
+            .expect("panic config should always succeed");
+        ctx.fs = Box::new(crate::adapters::live::filesystem::LiveFileSystem);
+        ctx
+    }
+
+    fn test_context_with_shell(exit_code: i32) -> ServiceContext {
+        let mut ctx = test_context();
+        ctx.fs = Box::new(crate::adapters::live::filesystem::LiveFileSystem);
+        ctx.shell = Box::new(FakeShellExecutor { exit_code });
+        ctx
+    }
 
     #[test]
     fn cli_validate_requires_spec_id_or_all() {
-        let result = run(None, false);
+        let ctx = test_context();
+        let result = run_with_context(&ctx, None, false, None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("SPEC_ID"));
     }
@@ -98,7 +133,7 @@ mod tests {
     #[test]
     fn cli_validate_all_empty_store() {
         let dir = PathBuf::from("/tmp/speck_test_empty_store_nonexistent");
-        let ctx = ServiceContext::live();
+        let ctx = test_context();
         let result = run_with_context(&ctx, None, true, Some(&dir));
         assert!(result.is_ok());
     }
@@ -106,7 +141,7 @@ mod tests {
     #[test]
     fn cli_validate_single_spec_not_found() {
         let dir = PathBuf::from("/tmp/speck_test_empty_store_nonexistent");
-        let ctx = ServiceContext::live();
+        let ctx = test_context();
         let result = run_with_context(&ctx, Some("NONEXISTENT"), false, Some(&dir));
         assert!(result.is_err());
     }
@@ -137,7 +172,7 @@ mod tests {
         let yaml = serde_yaml::to_string(&spec).unwrap();
         std::fs::write(tasks_dir.join("TASK-1.yaml"), &yaml).unwrap();
 
-        let ctx = ServiceContext::live();
+        let ctx = test_context_with_shell(0);
         let result = run_with_context(&ctx, Some("TASK-1"), false, Some(&dir));
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -170,7 +205,7 @@ mod tests {
         let yaml = serde_yaml::to_string(&spec).unwrap();
         std::fs::write(tasks_dir.join("TASK-2.yaml"), &yaml).unwrap();
 
-        let ctx = ServiceContext::live();
+        let ctx = test_context_with_shell(1);
         let result = run_with_context(&ctx, Some("TASK-2"), false, Some(&dir));
 
         let _ = std::fs::remove_dir_all(&dir);
