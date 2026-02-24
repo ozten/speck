@@ -46,6 +46,22 @@ If you need to compute derived metrics from the provided data (e.g., averages, r
 
 Only proceed past this point if there are 3 or more non-analysis sessions in the window.
 
+## Process Backlog Guard
+
+**Before filing any new beads**, count open chore/process-type beads by running:
+
+```python
+import json
+beads = [json.loads(l) for l in open('.beads/issues.jsonl') if l.strip()]
+open_chores = [b for b in beads if b.get('status') == 'open' and b.get('type') in ('chore', 'process')]
+print(f"Open chore/process beads: {len(open_chores)}")
+for b in sorted(open_chores, key=lambda x: x.get('priority', 9)):
+    print(f"  {b['id']}: {b['title']}")
+```
+
+- If open chore/process beads **> 5**: do **NOT** file any new beads. Output the list of open chores and stop. The agent loop should drain the existing backlog first.
+- If open chore/process beads **<= 5**: proceed normally to file improvements.
+
 ## Your Task
 
 1. **Analyze** the metrics above for patterns:
