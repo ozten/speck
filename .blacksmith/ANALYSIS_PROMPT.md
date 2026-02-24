@@ -46,6 +46,21 @@ If you need to compute derived metrics from the provided data (e.g., averages, r
 
 Only proceed past this point if there are 3 or more non-analysis sessions in the window.
 
+## Improvement Backlog Guard
+
+**Before doing anything else after the Minimum Data Guard**, count open improvements by running:
+
+```bash
+blacksmith improve list --status open 2>&1 | grep -c "^R[0-9]" || echo "0"
+```
+
+- If open improvement count **> 10**: output exactly `SKIP: improvement backlog too large (N open improvements, threshold 10)` and stop immediately.
+- Do **not** file beads, record improvements, or run any analysis.
+- Do **not** commit anything.
+- The existing improvements should be implemented first before filing more.
+
+Only proceed past this point if open improvements <= 10.
+
 ## Process Backlog Guard
 
 **Before filing any new beads**, count open chore/process-type beads by running:

@@ -23,6 +23,7 @@ max = 1
 [improvements]
 analyze_every = 3       # Spawn analysis agent every N completed sessions (0 = disabled)
 analyze_sessions = 1    # Number of recent sessions to include in the analysis prompt
+backlog_threshold = 10  # Skip analysis if open improvement count exceeds this (0 = disabled)
 
 [quality_gates]
 check = ["cargo check --release"]
