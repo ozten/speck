@@ -155,7 +155,9 @@ pub async fn reconcile(
     let response: CompletionResponse =
         ctx.llm.complete(&request).await.map_err(|e| format!("LLM reconciliation failed: {e}"))?;
 
-    parse_reconciliation_response(&response.text, circular)
+    let mut result = parse_reconciliation_response(&response.text, circular)?;
+    result.suggested_reorders = filter_reorders(result.suggested_reorders, task_specs);
+    Ok(result)
 }
 
 /// Detects circular dependencies among task specs using their context.dependencies.
@@ -274,11 +276,60 @@ fn build_reconciliation_prompt(specs: &[TaskSpec], circular: &[Vec<String>]) -> 
          }\n\n\
          - merges: Tasks with overlapping work (same files, similar criteria) that should be combined.\n\
          - extractions: Shared abstractions multiple tasks need that should become foundational tasks.\n\
-         - reorders: Tasks that should come earlier because others depend on their output.\n\
+         - reorders: Tasks where task B literally cannot be implemented without task A's \
+           specific output (e.g., A defines a type/API/schema that B imports or calls). \
+           Do NOT suggest reordering when two tasks merely touch the same subsystem \
+           (e.g., both use the database, both modify the same module) but operate independently. \
+           Shared subsystem usage is NOT a dependency.\n\
          - Return empty arrays if no issues are found.\n",
     );
 
     prompt
+}
+
+/// Filters out spurious reorder suggestions where items share modules but have
+/// no explicit data-flow dependency between them. If neither task lists the other
+/// as a dependency AND they share modules, the reorder is likely based on
+/// coincidental subsystem overlap rather than a genuine output→input relationship.
+fn filter_reorders(reorders: Vec<ReorderSuggestion>, specs: &[TaskSpec]) -> Vec<ReorderSuggestion> {
+    let spec_map: HashMap<&str, &TaskSpec> = specs.iter().map(|s| (s.id.as_str(), s)).collect();
+
+    reorders
+        .into_iter()
+        .filter(|r| {
+            let (Some(task_a), Some(task_b)) =
+                (spec_map.get(r.task_id.as_str()), spec_map.get(r.should_precede.as_str()))
+            else {
+                // Unknown task ID — drop the suggestion.
+                return false;
+            };
+
+            // If either task explicitly depends on the other, the reorder is valid.
+            let has_explicit_dep = |from: &TaskSpec, to_id: &str| -> bool {
+                from.context.as_ref().is_some_and(|c| c.dependencies.iter().any(|d| d == to_id))
+            };
+
+            if has_explicit_dep(task_b, &r.task_id) || has_explicit_dep(task_a, &r.should_precede) {
+                return true;
+            }
+
+            // Neither has an explicit dependency on the other.
+            // If they share modules, the LLM likely confused subsystem overlap for a dependency.
+            let a_modules: HashSet<&str> = task_a
+                .context
+                .as_ref()
+                .map(|c| c.modules.iter().map(String::as_str).collect())
+                .unwrap_or_default();
+            let b_modules: HashSet<&str> = task_b
+                .context
+                .as_ref()
+                .map(|c| c.modules.iter().map(String::as_str).collect())
+                .unwrap_or_default();
+
+            // Keep the reorder only if they do NOT share modules (cross-module dependency).
+            a_modules.is_disjoint(&b_modules)
+        })
+        .collect()
 }
 
 /// Parses the LLM reconciliation response into a `ReconciliationResult`.
@@ -767,6 +818,118 @@ mod tests {
         let result = reconcile(&ctx, &specs).await.unwrap();
         assert!(!result.circular_dependencies.is_empty());
         assert_eq!(result.suggested_reorders.len(), 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- filter_reorders tests ---
+
+    #[test]
+    fn filter_keeps_reorder_with_explicit_dependency() {
+        // B explicitly depends on A → reorder A before B is valid.
+        let specs = vec![
+            sample_spec("A", "Task A", &["db"], &[]),
+            sample_spec("B", "Task B", &["db"], &["A"]),
+        ];
+        let reorders = vec![ReorderSuggestion {
+            task_id: "A".into(),
+            should_precede: "B".into(),
+            reason: "B uses A's output".into(),
+        }];
+        let filtered = filter_reorders(reorders, &specs);
+        assert_eq!(filtered.len(), 1);
+    }
+
+    #[test]
+    fn filter_removes_reorder_for_shared_module_no_dependency() {
+        // Both touch "db" but neither depends on the other → spurious reorder.
+        let specs = vec![
+            sample_spec("A", "Migration A", &["db"], &[]),
+            sample_spec("B", "Migration B", &["db"], &[]),
+        ];
+        let reorders = vec![ReorderSuggestion {
+            task_id: "A".into(),
+            should_precede: "B".into(),
+            reason: "A creates the table B needs".into(),
+        }];
+        let filtered = filter_reorders(reorders, &specs);
+        assert!(filtered.is_empty(), "should filter out shared-module reorder without dependency");
+    }
+
+    #[test]
+    fn filter_keeps_cross_module_reorder_without_explicit_dep() {
+        // Different modules, no explicit dep → LLM likely found a real cross-module dependency.
+        let specs = vec![
+            sample_spec("A", "Define types", &["types"], &[]),
+            sample_spec("B", "Use types", &["api"], &[]),
+        ];
+        let reorders = vec![ReorderSuggestion {
+            task_id: "A".into(),
+            should_precede: "B".into(),
+            reason: "B imports types defined by A".into(),
+        }];
+        let filtered = filter_reorders(reorders, &specs);
+        assert_eq!(filtered.len(), 1);
+    }
+
+    #[test]
+    fn filter_drops_reorder_with_unknown_task_id() {
+        let specs = vec![sample_spec("A", "Task A", &["mod"], &[])];
+        let reorders = vec![ReorderSuggestion {
+            task_id: "UNKNOWN".into(),
+            should_precede: "A".into(),
+            reason: "phantom".into(),
+        }];
+        let filtered = filter_reorders(reorders, &specs);
+        assert!(filtered.is_empty());
+    }
+
+    #[tokio::test]
+    async fn reconcile_filters_independent_items_sharing_subsystem() {
+        // Integration test: LLM suggests a reorder between two DB tasks with no
+        // explicit dependency. The filter should remove it.
+        let dir = std::env::temp_dir().join("speck_reconcile_test_independent");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let llm_response = serde_json::to_string(&json!({
+            "merges": [],
+            "extractions": [],
+            "reorders": [{
+                "task_id": "T1",
+                "should_precede": "T2",
+                "reason": "T1 creates the database table that T2 uses"
+            }]
+        }))
+        .unwrap();
+
+        let interactions = vec![Interaction {
+            seq: 0,
+            port: "llm".into(),
+            method: "complete".into(),
+            input: json!({}),
+            output: json!({
+                "ok": {
+                    "text": llm_response,
+                    "prompt_tokens": 300,
+                    "completion_tokens": 100
+                }
+            }),
+        }];
+
+        let cassette_path = write_cassette(&dir, "reconcile_independent", interactions);
+        let ctx = ServiceContext::replaying(&cassette_path).unwrap();
+
+        // Both tasks touch "db" but neither depends on the other.
+        let specs = vec![
+            sample_spec("T1", "Expansion event recording", &["db"], &[]),
+            sample_spec("T2", "Post-integration hook", &["db"], &[]),
+        ];
+
+        let result = reconcile(&ctx, &specs).await.unwrap();
+        assert!(
+            result.suggested_reorders.is_empty(),
+            "independent items sharing a subsystem should not be reordered"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
