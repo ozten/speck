@@ -149,6 +149,12 @@ You have a **hard budget of 80 assistant turns** per session. Track your turn co
 
 If you realize before turn 40 that the task is too large to complete in the remaining budget, STOP immediately. Mark the failure, and exit. Do not burn 40 more turns on a doomed session.
 
+**Turn 60 gate — TOO-LARGE check:** At turn 60, if you have NOT yet started step 4 (Verify), the bead is too large for one session. STOP immediately:
+```bash
+bd update <id> --status=open --notes="[TOO-LARGE] YYYY-MM-DD: exceeded 60 turns before verification"
+```
+Record a progress entry and exit cleanly. The next session will detect the [TOO-LARGE] marker and invoke `/break-down-issue` to decompose it.
+
 ### Marking a Failed Attempt
 When bailing out of a task for any reason, always run:
 ```bash
