@@ -60,3 +60,11 @@ compare = "pct_sessions"
 threshold = 99.0
 direction = "above"
 label = "Cost tracking health"
+
+# Cost ceiling: alert when any session exceeds $2.00.
+[[metrics.targets.rules]]
+kind = "cost.estimate_usd"
+compare = "max"
+threshold = 2.0
+direction = "below"
+label = "Cost per session"
