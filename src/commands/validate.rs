@@ -4,54 +4,72 @@ use std::path::{Path, PathBuf};
 
 use crate::context::ServiceContext;
 use crate::store::SpecStore;
+use crate::sync::beads as beads_sync;
 use crate::validate;
 
 /// Execute the `validate` command with a provided context.
 ///
-/// When `spec_id` is provided, validates a single spec.
+/// When `bead_id` is provided, reads the spec from bd and validates it.
+/// When `spec_id` is provided, validates a single spec from the local store.
 /// When `--all` is set, validates every spec in the store.
+/// When `--json` is set, outputs structured JSON instead of human-readable text.
 /// Returns an error (non-zero exit) when any check fails.
 ///
 /// # Errors
 ///
-/// Returns an error string if no spec is specified (and `--all` is not set),
+/// Returns an error string if no spec is specified,
 /// or if loading/validation fails.
 pub fn run_with_context(
     ctx: &ServiceContext,
     spec_id: Option<&str>,
     all: bool,
+    bead_id: Option<&str>,
+    output_json: bool,
     override_store_root: Option<&Path>,
 ) -> Result<(), String> {
-    if spec_id.is_none() && !all {
-        return Err("Provide a SPEC_ID or use --all to validate all specs".to_string());
-    }
-
-    let resolved_root = match override_store_root {
-        Some(root) => root.to_path_buf(),
-        None => store_root()?,
-    };
-    let store = SpecStore::new(ctx, &resolved_root);
-
     let mut results = Vec::new();
 
-    if all {
-        let ids = store.list_task_specs()?;
-        if ids.is_empty() {
-            println!("No specs found in store.");
-            return Ok(());
+    if let Some(bid) = bead_id {
+        // Read spec from bd issue tracker.
+        let issue =
+            ctx.issues.get_issue(bid).map_err(|e| format!("Failed to fetch bead '{bid}': {e}"))?;
+        let spec = beads_sync::parse_spec_from_body(bid, &issue.title, &issue.body)?;
+        results.push(validate::validate(ctx, &spec));
+    } else {
+        if spec_id.is_none() && !all {
+            return Err("Provide a SPEC_ID, --bead <bead-id>, or use --all to validate all specs"
+                .to_string());
         }
-        for id in &ids {
+
+        let resolved_root = match override_store_root {
+            Some(root) => root.to_path_buf(),
+            None => store_root()?,
+        };
+        let store = SpecStore::new(ctx, &resolved_root);
+
+        if all {
+            let ids = store.list_task_specs()?;
+            if ids.is_empty() {
+                println!("No specs found in store.");
+                return Ok(());
+            }
+            for id in &ids {
+                let spec = store.load_task_spec(id)?;
+                results.push(validate::validate(ctx, &spec));
+            }
+        } else if let Some(id) = spec_id {
             let spec = store.load_task_spec(id)?;
             results.push(validate::validate(ctx, &spec));
         }
-    } else if let Some(id) = spec_id {
-        let spec = store.load_task_spec(id)?;
-        results.push(validate::validate(ctx, &spec));
     }
 
     let mut any_failed = false;
     for result in &results {
-        println!("{}", validate::format_report(result));
+        if output_json {
+            println!("{}", validate::format_json(result));
+        } else {
+            println!("{}", validate::format_report(result));
+        }
         if !result.passed() {
             any_failed = true;
         }
@@ -72,7 +90,7 @@ pub fn run_with_context(
 /// or if loading/validation fails.
 pub fn run(spec_id: Option<&str>, all: bool) -> Result<(), String> {
     let ctx = ServiceContext::live();
-    run_with_context(&ctx, spec_id, all, None)
+    run_with_context(&ctx, spec_id, all, None, false, None)
 }
 
 /// Resolve the spec store root directory.
@@ -125,7 +143,7 @@ mod tests {
     #[test]
     fn cli_validate_requires_spec_id_or_all() {
         let ctx = test_context();
-        let result = run_with_context(&ctx, None, false, None);
+        let result = run_with_context(&ctx, None, false, None, false, None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("SPEC_ID"));
     }
@@ -134,7 +152,7 @@ mod tests {
     fn cli_validate_all_empty_store() {
         let dir = PathBuf::from("/tmp/speck_test_empty_store_nonexistent");
         let ctx = test_context();
-        let result = run_with_context(&ctx, None, true, Some(&dir));
+        let result = run_with_context(&ctx, None, true, None, false, Some(&dir));
         assert!(result.is_ok());
     }
 
@@ -142,7 +160,7 @@ mod tests {
     fn cli_validate_single_spec_not_found() {
         let dir = PathBuf::from("/tmp/speck_test_empty_store_nonexistent");
         let ctx = test_context();
-        let result = run_with_context(&ctx, Some("NONEXISTENT"), false, Some(&dir));
+        let result = run_with_context(&ctx, Some("NONEXISTENT"), false, None, false, Some(&dir));
         assert!(result.is_err());
     }
 
@@ -174,7 +192,7 @@ mod tests {
         std::fs::write(tasks_dir.join("TASK-1.yaml"), &yaml).unwrap();
 
         let ctx = test_context_with_shell(0);
-        let result = run_with_context(&ctx, Some("TASK-1"), false, Some(&dir));
+        let result = run_with_context(&ctx, Some("TASK-1"), false, None, false, Some(&dir));
 
         let _ = std::fs::remove_dir_all(&dir);
         assert!(result.is_ok());
@@ -208,7 +226,7 @@ mod tests {
         std::fs::write(tasks_dir.join("TASK-2.yaml"), &yaml).unwrap();
 
         let ctx = test_context_with_shell(1);
-        let result = run_with_context(&ctx, Some("TASK-2"), false, Some(&dir));
+        let result = run_with_context(&ctx, Some("TASK-2"), false, None, false, Some(&dir));
 
         let _ = std::fs::remove_dir_all(&dir);
         assert!(result.is_err());

@@ -40,6 +40,11 @@ struct ListIssuesInput<'a> {
     status: Option<&'a str>,
 }
 
+#[derive(Serialize)]
+struct GetIssueInput<'a> {
+    id: &'a str,
+}
+
 impl IssueTracker for RecordingIssueTracker {
     fn create_issue(
         &self,
@@ -72,6 +77,13 @@ impl IssueTracker for RecordingIssueTracker {
         let result = self.inner.list_issues(status);
         let input = ListIssuesInput { status };
         record_result(&self.recorder, "issues", "list_issues", &input, &result);
+        result
+    }
+
+    fn get_issue(&self, id: &str) -> Result<Issue, Box<dyn std::error::Error + Send + Sync>> {
+        let result = self.inner.get_issue(id);
+        let input = GetIssueInput { id };
+        record_result(&self.recorder, "issues", "get_issue", &input, &result);
         result
     }
 }
@@ -116,6 +128,15 @@ mod tests {
             _status: Option<&str>,
         ) -> Result<Vec<Issue>, Box<dyn std::error::Error + Send + Sync>> {
             Ok(vec![])
+        }
+
+        fn get_issue(&self, id: &str) -> Result<Issue, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(Issue {
+                id: id.into(),
+                title: "Fake issue".into(),
+                body: String::new(),
+                status: "open".into(),
+            })
         }
     }
 

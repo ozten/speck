@@ -53,4 +53,11 @@ pub trait IssueTracker: Send + Sync {
         &self,
         status: Option<&str>,
     ) -> Result<Vec<Issue>, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Retrieves a single issue by its ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the issue cannot be found or fetched.
+    fn get_issue(&self, id: &str) -> Result<Issue, Box<dyn std::error::Error + Send + Sync>>;
 }

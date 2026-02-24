@@ -128,6 +128,23 @@ impl IssueTracker for LiveIssueTracker {
         Ok(bd_issue.into())
     }
 
+    fn get_issue(&self, id: &str) -> Result<Issue, Box<dyn std::error::Error + Send + Sync>> {
+        let show_output = Command::new("bd")
+            .args(["show", id, "--json"])
+            .output()
+            .map_err(|e| format!("Failed to run bd show: {e}"))?;
+
+        if !show_output.status.success() {
+            let stderr = String::from_utf8_lossy(&show_output.stderr);
+            return Err(format!("bd show failed: {stderr}").into());
+        }
+
+        let bd_issue: BdIssue = serde_json::from_slice(&show_output.stdout)
+            .map_err(|e| format!("Failed to parse bd show JSON: {e}"))?;
+
+        Ok(bd_issue.into())
+    }
+
     fn list_issues(
         &self,
         status: Option<&str>,

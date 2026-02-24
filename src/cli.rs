@@ -28,6 +28,12 @@ pub enum Command {
         /// Validate all specs in the store.
         #[arg(long)]
         all: bool,
+        /// Read the spec from a bead in bd by bead ID.
+        #[arg(long)]
+        bead: Option<String>,
+        /// Output structured JSON instead of human-readable text.
+        #[arg(long)]
+        json: bool,
     },
     /// Map dependencies between tasks.
     Map {
@@ -78,19 +84,37 @@ mod tests {
     #[test]
     fn parses_validate_subcommand() {
         let cli = Cli::parse_from(["speck", "validate"]);
-        assert!(matches!(cli.command, Command::Validate { spec_id: None, all: false }));
+        assert!(matches!(
+            cli.command,
+            Command::Validate { spec_id: None, all: false, bead: None, json: false }
+        ));
     }
 
     #[test]
     fn parses_validate_with_spec_id() {
         let cli = Cli::parse_from(["speck", "validate", "TASK-1"]);
-        assert!(matches!(cli.command, Command::Validate { spec_id: Some(_), all: false }));
+        assert!(matches!(cli.command, Command::Validate { spec_id: Some(_), all: false, .. }));
     }
 
     #[test]
     fn parses_validate_all() {
         let cli = Cli::parse_from(["speck", "validate", "--all"]);
-        assert!(matches!(cli.command, Command::Validate { spec_id: None, all: true }));
+        assert!(matches!(cli.command, Command::Validate { spec_id: None, all: true, .. }));
+    }
+
+    #[test]
+    fn parses_validate_bead() {
+        let cli = Cli::parse_from(["speck", "validate", "--bead", "speck-42"]);
+        assert!(matches!(cli.command, Command::Validate { bead: Some(_), json: false, .. }));
+        if let Command::Validate { bead, .. } = cli.command {
+            assert_eq!(bead.as_deref(), Some("speck-42"));
+        }
+    }
+
+    #[test]
+    fn parses_validate_json_flag() {
+        let cli = Cli::parse_from(["speck", "validate", "--bead", "speck-42", "--json"]);
+        assert!(matches!(cli.command, Command::Validate { json: true, .. }));
     }
 
     #[test]

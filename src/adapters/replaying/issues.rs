@@ -53,4 +53,9 @@ impl IssueTracker for ReplayingIssueTracker {
         let output = next_output(self.replayer.as_ref(), "issues", "list_issues");
         replay_result(output)
     }
+
+    fn get_issue(&self, _id: &str) -> Result<Issue, Box<dyn std::error::Error + Send + Sync>> {
+        let output = next_output(self.replayer.as_ref(), "issues", "get_issue");
+        replay_result(output)
+    }
 }

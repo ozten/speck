@@ -7,7 +7,7 @@ use std::fmt::Write;
 
 use crate::context::ServiceContext;
 use crate::ports::issues::Issue;
-use crate::spec::TaskSpec;
+use crate::spec::{SignalType, TaskSpec, VerificationStrategy};
 
 /// What the sync will do (or did) for a single spec.
 #[derive(Debug, PartialEq)]
@@ -96,6 +96,73 @@ fn issue_body(spec: &TaskSpec) -> String {
     }
 
     body
+}
+
+/// Parses a [`TaskSpec`] from a bead issue body.
+///
+/// The body must contain a `## Verification` section with a YAML fenced block
+/// (as produced by [`issue_body`]).  The `bead_id` becomes the spec ID, and the
+/// `[SPEC-ID]` prefix is stripped from `title` if present.
+///
+/// # Errors
+///
+/// Returns an error if the body contains no parseable YAML verification block.
+pub fn parse_spec_from_body(bead_id: &str, title: &str, body: &str) -> Result<TaskSpec, String> {
+    // Strip "[BEAD-ID] " prefix from title if present.
+    let prefix = format!("[{bead_id}] ");
+    let clean_title = if title.starts_with(&prefix) {
+        title[prefix.len()..].to_string()
+    } else {
+        title.to_string()
+    };
+
+    let acceptance_criteria = extract_acceptance_criteria(body);
+    let verification = extract_verification(body)?;
+
+    Ok(TaskSpec {
+        id: bead_id.to_string(),
+        title: clean_title,
+        requirement: None,
+        context: None,
+        acceptance_criteria,
+        signal_type: SignalType::Clear,
+        verification,
+        affected_globs: None,
+    })
+}
+
+/// Extracts acceptance criteria bullet points from the `## Acceptance Criteria` section.
+fn extract_acceptance_criteria(body: &str) -> Vec<String> {
+    let mut criteria = Vec::new();
+    let mut in_section = false;
+    for line in body.lines() {
+        if line == "## Acceptance Criteria" {
+            in_section = true;
+            continue;
+        }
+        if in_section {
+            if line.starts_with("## ") {
+                break;
+            }
+            if let Some(item) = line.strip_prefix("- ") {
+                criteria.push(item.to_string());
+            }
+        }
+    }
+    criteria
+}
+
+/// Extracts and parses the YAML verification block from the `## Verification` section.
+fn extract_verification(body: &str) -> Result<VerificationStrategy, String> {
+    let yaml_marker = "```yaml\n";
+    let start_offset =
+        body.find(yaml_marker).ok_or_else(|| "No yaml block found in bead body".to_string())?;
+    let start = start_offset + yaml_marker.len();
+    let end_offset = body[start..]
+        .find("\n```")
+        .ok_or_else(|| "No yaml block end found in bead body".to_string())?;
+    let yaml_str = &body[start..start + end_offset];
+    serde_yaml::from_str(yaml_str).map_err(|e| format!("Failed to parse verification YAML: {e}"))
 }
 
 /// Finds an existing issue that matches the given spec ID.
@@ -398,6 +465,49 @@ mod tests {
                 && verify_pos < deps_pos,
             "unexpected section order in body"
         );
+    }
+
+    #[test]
+    fn parse_spec_from_body_round_trips_verification() {
+        let spec = sample_spec("T-1", "My task");
+        let body = issue_body(&spec);
+        let title = format!("[T-1] My task");
+        let parsed = super::parse_spec_from_body("T-1", &title, &body).unwrap();
+        assert_eq!(parsed.id, "T-1");
+        assert_eq!(parsed.title, "My task");
+        assert_eq!(parsed.verification, spec.verification);
+    }
+
+    #[test]
+    fn parse_spec_from_body_extracts_acceptance_criteria() {
+        let mut spec = sample_spec("T-2", "Criteria task");
+        spec.acceptance_criteria = vec!["criterion A".to_string(), "criterion B".to_string()];
+        let body = issue_body(&spec);
+        let parsed = super::parse_spec_from_body("T-2", "[T-2] Criteria task", &body).unwrap();
+        assert_eq!(parsed.acceptance_criteria, vec!["criterion A", "criterion B"]);
+    }
+
+    #[test]
+    fn parse_spec_from_body_strips_title_prefix() {
+        let spec = sample_spec("T-3", "Strip prefix");
+        let body = issue_body(&spec);
+        let parsed = super::parse_spec_from_body("T-3", "[T-3] Strip prefix", &body).unwrap();
+        assert_eq!(parsed.title, "Strip prefix");
+    }
+
+    #[test]
+    fn parse_spec_from_body_handles_title_without_prefix() {
+        let spec = sample_spec("T-4", "No prefix");
+        let body = issue_body(&spec);
+        let parsed = super::parse_spec_from_body("T-4", "No prefix", &body).unwrap();
+        assert_eq!(parsed.title, "No prefix");
+    }
+
+    #[test]
+    fn parse_spec_from_body_errors_on_missing_yaml_block() {
+        let result = super::parse_spec_from_body("T-5", "Title", "no yaml here");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("yaml block"));
     }
 
     #[test]

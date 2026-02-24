@@ -230,6 +230,49 @@ pub fn validate_with_drift(
     result
 }
 
+/// Formats a `ValidationResult` as a structured JSON string.
+///
+/// The JSON object includes `spec_id`, `passed`, and a `checks` array where
+/// each entry has `name`, `passed`, `detail`, and `category`.
+#[must_use]
+pub fn format_json(result: &ValidationResult) -> String {
+    use serde::Serialize;
+
+    #[derive(Serialize)]
+    struct CheckJson<'a> {
+        name: &'a str,
+        passed: bool,
+        detail: &'a str,
+        category: &'static str,
+    }
+
+    #[derive(Serialize)]
+    struct ResultJson<'a> {
+        spec_id: &'a str,
+        passed: bool,
+        checks: Vec<CheckJson<'a>>,
+    }
+
+    let checks = result
+        .checks
+        .iter()
+        .map(|c| CheckJson {
+            name: &c.name,
+            passed: c.passed,
+            detail: &c.detail,
+            category: match c.category {
+                CheckCategory::Executable => "executable",
+                CheckCategory::ManualReview => "manual_review",
+                CheckCategory::Drift => "drift",
+            },
+        })
+        .collect();
+
+    let json_result = ResultJson { spec_id: &result.spec_id, passed: result.passed(), checks };
+
+    serde_json::to_string_pretty(&json_result).unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}"))
+}
+
 /// Formats a `ValidationResult` as a human-readable report.
 #[must_use]
 pub fn format_report(result: &ValidationResult) -> String {

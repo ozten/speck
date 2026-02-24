@@ -55,8 +55,8 @@ pub fn dispatch(command: &Command) -> Result<(), String> {
 fn dispatch_with_context(command: &Command, ctx: &ServiceContext) -> Result<(), String> {
     match command {
         Command::Plan { ref doc } => plan::run(ctx, doc),
-        Command::Validate { spec_id, all } => {
-            validate::run_with_context(ctx, spec_id.as_deref(), *all, None)
+        Command::Validate { spec_id, all, bead, json } => {
+            validate::run_with_context(ctx, spec_id.as_deref(), *all, bead.as_deref(), *json, None)
         }
         Command::Map { diff } => map::run(*diff),
         Command::Show { id } => show::run(id.as_deref()),
