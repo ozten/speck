@@ -6,6 +6,7 @@ use std::path::Path;
 use crate::context::ServiceContext;
 use crate::plan::conversation::{self, AnalysisResult};
 use crate::plan::reconcile::{self, ReconciliationResult};
+use crate::plan::score::{self, ScoreResult};
 use crate::plan::signal::{
     self, ClassificationResult, PlanCheck, SignalType as PlanSignalType,
     VerificationStrategy as PlanVerificationStrategy,
@@ -36,6 +37,11 @@ pub fn run(ctx: &ServiceContext, doc_path: &Path) -> Result<(), String> {
         .enable_all()
         .build()
         .map_err(|e| format!("failed to create async runtime: {e}"))?;
+
+    // Pass 0: Score the document for specificity and verifiability
+    let score_result = rt
+        .block_on(score::score_document(ctx.llm.as_ref(), &requirement_text))
+        .map_err(|e| format!("document scoring failed: {e}"))?;
 
     // Pass 1: Broad codebase survey
     let survey = rt.block_on(broad_survey(ctx, &root, &requirement_text))?;
@@ -93,7 +99,7 @@ pub fn run(ctx: &ServiceContext, doc_path: &Path) -> Result<(), String> {
     }
 
     // Print structured output
-    print_structured_output(&specs, &analysis, &reconciliation, &store_root);
+    print_structured_output(&specs, &analysis, &reconciliation, &score_result, &store_root);
 
     Ok(())
 }
@@ -103,8 +109,11 @@ fn print_structured_output(
     specs: &[TaskSpec],
     analysis: &AnalysisResult,
     reconciliation: &ReconciliationResult,
+    score_result: &ScoreResult,
     store_root: &Path,
 ) {
+    print_score(score_result);
+
     // --- Derived Tasks ---
     println!("\n=== Derived Tasks ({}) ===", specs.len());
     for (i, spec) in specs.iter().enumerate() {
@@ -143,6 +152,58 @@ fn print_structured_output(
     // --- Summary ---
     println!("\n=== Summary ===");
     println!("{} spec(s) saved to {}", specs.len(), store_root.display());
+}
+
+/// Print the plan score in structured, LLM-parseable format.
+fn print_score(result: &ScoreResult) {
+    println!("\n=== Readiness Score ===");
+    println!("Overall: {}% — {}", result.overall_score, result.verdict.label());
+    println!(
+        "  Specificity:   {}%{}",
+        result.specificity.score,
+        if result.specificity.issues.is_empty() { String::new() } else { " (issues below)".into() }
+    );
+    for issue in &result.specificity.issues {
+        println!("    - {issue}");
+    }
+    println!(
+        "  Verifiability: {}%{}",
+        result.verifiability.score,
+        if result.verifiability.issues.is_empty() {
+            String::new()
+        } else {
+            " (issues below)".into()
+        }
+    );
+    for issue in &result.verifiability.issues {
+        println!("    - {issue}");
+    }
+
+    if !result.questions.is_empty() {
+        println!("\n=== Scoring Questions ===");
+        for (i, q) in result.questions.iter().enumerate() {
+            println!("Q{}: {}", i + 1, q.description);
+            for (j, opt) in q.options.iter().enumerate() {
+                #[allow(clippy::cast_possible_truncation)]
+                let label = char::from(b'a' + j as u8);
+                let rec = q.recommended.map_or(String::new(), |r| {
+                    if r == j {
+                        " (recommended)".into()
+                    } else {
+                        String::new()
+                    }
+                });
+                println!("  {label}) {opt}{rec}");
+            }
+        }
+    }
+
+    if !result.recommendations.is_empty() {
+        println!("\n=== Recommendations ===");
+        for rec in &result.recommendations {
+            println!("  - {rec}");
+        }
+    }
 }
 
 /// Print a `SurveyResult` to stdout in a human-readable format.

@@ -3,6 +3,7 @@
 pub mod conversation;
 pub mod feedback;
 pub mod reconcile;
+pub mod score;
 pub mod signal;
 pub mod survey;
 

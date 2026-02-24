@@ -114,6 +114,17 @@ fn plan_with_cassette_produces_specs() {
 
     assert!(output.status.success(), "plan command failed.\nstdout: {stdout}\nstderr: {stderr}");
 
+    // Verify score output
+    assert!(stdout.contains("Readiness Score"), "should print readiness score.\nstdout: {stdout}");
+    assert!(
+        stdout.contains("Specificity"),
+        "should print specificity sub-score.\nstdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("Verifiability"),
+        "should print verifiability sub-score.\nstdout: {stdout}"
+    );
+
     // Verify survey output
     assert!(stdout.contains("Routing Table"), "should print routing table.\nstdout: {stdout}");
 

@@ -2,8 +2,19 @@ name: plan-integration-test
 recorded_at: '2026-01-20T14:00:00Z'
 commit: abc123test
 interactions:
+# --- Pass 0: Document scoring ---
+# 1. llm.complete — score document for specificity and verifiability
+- seq: 0
+  port: llm
+  method: complete
+  input: {}
+  output:
+    ok:
+      text: '{"specificity_score": 75, "specificity_issues": ["Missing edge cases for invalid input"], "verifiability_score": 70, "verifiability_issues": ["No explicit acceptance criteria"], "questions": [{"description": "How should auth failures be reported?", "options": ["Return HTTP 401 with error body (recommended)", "Redirect to login page"], "recommended": 0}], "recommendations": ["Add: authentication failures return HTTP 401 with JSON error body"]}'
+      prompt_tokens: 400
+      completion_tokens: 100
 # --- Pass 1: Broad survey ---
-# 1. git.current_commit for cache check
+# 2. git.current_commit for cache check
 - seq: 0
   port: git
   method: current_commit
