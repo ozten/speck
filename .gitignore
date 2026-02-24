@@ -29,3 +29,5 @@ target
 /target
 .blacksmith/*
 !.blacksmith/config.toml
+!.blacksmith/ANALYSIS_PROMPT.md
+.blacksmith/
