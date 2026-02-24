@@ -18,6 +18,10 @@ These improvements are already tracked. Do NOT file duplicates.
 
 Total completed sessions this run: {{session_count}}
 
+## Data Source Directive
+
+All session metrics you need are provided above in `{{recent_metrics}}`. Do NOT explore the filesystem, read session files, or use Explore subagents. Start analysis immediately from the provided data.
+
 ## Minimum Data Guard
 
 **Before doing anything else**, count the number of non-analysis sessions in the metrics table above.
