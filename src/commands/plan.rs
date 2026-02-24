@@ -4,6 +4,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use crate::context::ServiceContext;
+use crate::linkage;
 use crate::plan::conversation::{self, AnalysisResult};
 use crate::plan::reconcile::{self, PlanDiff, ReconciliationResult, SpecMatchAction};
 use crate::plan::score::{self, ScoreResult};
@@ -43,8 +44,8 @@ pub fn run(ctx: &ServiceContext, doc_path: &Path) -> Result<(), String> {
         .block_on(score::score_document(ctx.llm.as_ref(), &requirement_text))
         .map_err(|e| format!("document scoring failed: {e}"))?;
 
-    // Pass 1: Broad codebase survey
-    let survey = rt.block_on(broad_survey(ctx, &root, &requirement_text))?;
+    // Pass 1: Broad codebase survey (also returns the codebase map for reuse)
+    let (survey, codebase_map) = rt.block_on(broad_survey(ctx, &root, &requirement_text))?;
     print_survey_result(&survey);
 
     // Pass 2: Signal classification
@@ -75,6 +76,20 @@ pub fn run(ctx: &ServiceContext, doc_path: &Path) -> Result<(), String> {
         }
     };
 
+    // Pass 2.5: Glob derivation via linkage resolution (reuses map from Pass 1)
+    let mut glob_warnings: Vec<String> = Vec::new();
+    for spec in &mut specs {
+        let linkage_result = linkage::resolve(spec, &codebase_map);
+        let (globs, unresolved) = linkage::derive_globs(&linkage_result);
+        for module_ref in &unresolved {
+            glob_warnings.push(format!(
+                "  [spec {}] unresolved module ref '{}': using best-effort glob",
+                spec.id, module_ref
+            ));
+        }
+        spec.affected_globs = Some(globs);
+    }
+
     // Pass 2.5a: Single-pass spec analysis (non-interactive feedback)
     let analysis = rt
         .block_on(conversation::analyze_specs(ctx, &specs))
@@ -101,7 +116,15 @@ pub fn run(ctx: &ServiceContext, doc_path: &Path) -> Result<(), String> {
     }
 
     // Print structured output
-    print_structured_output(&specs, &diff, &analysis, &reconciliation, &score_result, &store_root);
+    print_structured_output(
+        &specs,
+        &diff,
+        &analysis,
+        &reconciliation,
+        &score_result,
+        &store_root,
+        &glob_warnings,
+    );
 
     Ok(())
 }
@@ -114,6 +137,7 @@ fn print_structured_output(
     reconciliation: &ReconciliationResult,
     score_result: &ScoreResult,
     store_root: &Path,
+    glob_warnings: &[String],
 ) {
     print_score(score_result);
 
@@ -123,6 +147,21 @@ fn print_structured_output(
         println!("{}. {} — {}", i + 1, spec.id, spec.title);
         println!("   Signal: {:?}", spec.signal_type);
         println!("   Verification: {:?}", spec.verification);
+        if let Some(globs) = &spec.affected_globs {
+            if globs.is_empty() {
+                println!("   Affected globs: (none)");
+            } else {
+                println!("   Affected globs: {}", globs.join(", "));
+            }
+        }
+    }
+
+    // --- Glob Warnings ---
+    if !glob_warnings.is_empty() {
+        println!("\n=== Glob Resolution Warnings ===");
+        for warning in glob_warnings {
+            println!("{warning}");
+        }
     }
 
     // --- Feedback ---

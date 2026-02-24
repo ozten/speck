@@ -8,4 +8,4 @@ pub mod drift;
 pub mod resolve;
 
 pub use drift::{detect_drift, format_drift_report, DriftEntry, DriftReport};
-pub use resolve::{resolve, LinkageResult, ResolvedLink};
+pub use resolve::{derive_globs, resolve, LinkageResult, ResolvedLink};

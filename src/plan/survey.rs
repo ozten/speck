@@ -37,6 +37,9 @@ pub struct SurveyResult {
 /// cross-cutting concerns, and builds a routing table. Uses a cached codebase
 /// map from `.spec-cache/` if the commit hash matches, otherwise regenerates.
 ///
+/// Returns both the survey result and the underlying codebase map so callers
+/// can reuse the map (e.g., for linkage resolution) without a second load.
+///
 /// # Errors
 ///
 /// Returns an error if codebase traversal, LLM analysis, or map generation fails.
@@ -44,7 +47,7 @@ pub async fn broad_survey(
     ctx: &ServiceContext,
     root: &Path,
     requirement: &str,
-) -> Result<SurveyResult, String> {
+) -> Result<(SurveyResult, CodebaseMap), String> {
     let map = load_or_generate_map(ctx, root)?;
 
     let prompt = build_survey_prompt(&map, requirement);
@@ -54,7 +57,21 @@ pub async fn broad_survey(
     let response: CompletionResponse =
         ctx.llm.complete(&request).await.map_err(|e| format!("LLM survey failed: {e}"))?;
 
-    parse_survey_response(&response.text, &map)
+    let survey = parse_survey_response(&response.text, &map)?;
+    Ok((survey, map))
+}
+
+/// Loads or generates the codebase map for the given project root.
+///
+/// Uses a cached map at `.spec-cache/codebase_map.yaml` when the current commit
+/// hash matches; otherwise generates a fresh map and persists it to the cache.
+///
+/// # Errors
+///
+/// Returns an error if the git commit cannot be read, map generation fails, or
+/// the cache cannot be written.
+pub fn load_codebase_map(ctx: &ServiceContext, root: &Path) -> Result<CodebaseMap, String> {
+    load_or_generate_map(ctx, root)
 }
 
 /// Loads a cached codebase map if the commit hash matches, otherwise generates a new one.
@@ -279,7 +296,8 @@ mod tests {
             write_cassette(&dir, "survey_broad", make_survey_cassette_interactions());
         let ctx = ServiceContext::replaying(&cassette_path).unwrap();
 
-        let result = broad_survey(&ctx, Path::new("/project"), "Add authentication").await.unwrap();
+        let (result, map) =
+            broad_survey(&ctx, Path::new("/project"), "Add authentication").await.unwrap();
 
         assert_eq!(result.routing_table.len(), 2);
         assert!(result.routing_table.contains_key("src"));
@@ -290,6 +308,9 @@ mod tests {
         // Dependency graph built from codebase map
         assert!(result.dependency_graph.contains_key("src/map"));
         assert!(result.dependency_graph["src/map"].contains(&"context".to_string()));
+
+        // Returned map has the same modules as the dependency graph
+        assert_eq!(map.commit_hash, "abc123def");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -361,12 +382,16 @@ mod tests {
         let cassette_path = write_cassette(&dir, "survey_cached", interactions);
         let ctx = ServiceContext::replaying(&cassette_path).unwrap();
 
-        let result = broad_survey(&ctx, Path::new("/project"), "Some requirement").await.unwrap();
+        let (result, map) =
+            broad_survey(&ctx, Path::new("/project"), "Some requirement").await.unwrap();
 
         // Should use the cached map's module structure
         assert!(result.routing_table.contains_key("src/cached"));
         assert!(result.dependency_graph.contains_key("src/cached"));
         assert_eq!(result.dependency_graph["src/cached"], vec!["dep_a"]);
+
+        // Returned map matches the cached one
+        assert_eq!(map.commit_hash, "cached-commit");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
