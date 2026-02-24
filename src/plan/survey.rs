@@ -18,6 +18,15 @@ use crate::ports::llm::{CompletionRequest, CompletionResponse};
 /// Path where the cached codebase map is stored relative to project root.
 const CACHE_PATH: &str = ".spec-cache/codebase_map.yaml";
 
+/// A capability initially reported as a gap but matched to an existing module.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ExistingInfrastructure {
+    /// The original gap description from the LLM.
+    pub description: String,
+    /// Path of the existing module that covers this capability.
+    pub module_path: String,
+}
+
 /// Result of a Pass 1 broad codebase survey.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SurveyResult {
@@ -27,6 +36,9 @@ pub struct SurveyResult {
     pub cross_cutting_concerns: Vec<String>,
     /// Foundational gaps: capabilities assumed but not yet present.
     pub foundational_gaps: Vec<String>,
+    /// Capabilities initially flagged as gaps but matched to existing modules.
+    #[serde(default)]
+    pub existing_infrastructure: Vec<ExistingInfrastructure>,
     /// Dependency graph: module path -> list of modules it depends on.
     pub dependency_graph: HashMap<String, Vec<String>>,
 }
@@ -118,7 +130,9 @@ fn build_survey_prompt(map: &CodebaseMap, requirement: &str) -> String {
         }\n\n\
         - routing_table: Map each module to a short description of what kind of work lives there.\n\
         - cross_cutting_concerns: Capabilities needed by multiple modules that may need coordination.\n\
-        - foundational_gaps: Infrastructure or capabilities that the requirement assumes but don't exist yet.\n",
+        - foundational_gaps: Infrastructure or capabilities that the requirement assumes but don't \
+          exist yet in ANY of the modules listed above. Do NOT include capabilities already covered \
+          by existing modules — check each module's path and public items before listing a gap.\n",
     );
 
     prompt
@@ -148,12 +162,91 @@ fn parse_survey_response(response_text: &str, map: &CodebaseMap) -> Result<Surve
         dependency_graph.insert(module.path.clone(), module.dependencies.clone());
     }
 
+    // Cross-reference gaps against existing modules.
+    let (true_gaps, existing) = filter_gaps_against_modules(parsed.foundational_gaps, &map.modules);
+
     Ok(SurveyResult {
         routing_table: parsed.routing_table,
         cross_cutting_concerns: parsed.cross_cutting_concerns,
-        foundational_gaps: parsed.foundational_gaps,
+        foundational_gaps: true_gaps,
+        existing_infrastructure: existing,
         dependency_graph,
     })
+}
+
+/// Cross-references identified gaps against the codebase map's modules.
+///
+/// A gap is reclassified as existing infrastructure when its description
+/// contains a keyword derived from a module path stem or public item name.
+/// Keywords must be at least 3 characters to avoid false positives.
+fn filter_gaps_against_modules(
+    gaps: Vec<String>,
+    modules: &[crate::map::ModuleSummary],
+) -> (Vec<String>, Vec<ExistingInfrastructure>) {
+    // Build (keywords, module_path) pairs from the codebase map.
+    let module_keywords: Vec<(Vec<String>, &str)> = modules
+        .iter()
+        .map(|m| {
+            let mut keywords = Vec::new();
+            // Extract stem from module path (last path component).
+            let stem = m.path.rsplit('/').next().unwrap_or(&m.path).to_lowercase();
+            if stem.len() >= 3 {
+                keywords.push(stem.clone());
+                // Also add sub-words split on underscores.
+                for part in stem.split('_') {
+                    if part.len() >= 3 && part != stem {
+                        keywords.push(part.to_lowercase());
+                    }
+                }
+            }
+            // Extract names from public items (e.g. "fn login" → "login").
+            for item in &m.public_items {
+                if let Some(name) = item.split_whitespace().last() {
+                    let name_lower = name.to_lowercase();
+                    if name_lower.len() >= 3 {
+                        keywords.push(name_lower);
+                    }
+                }
+            }
+            (keywords, m.path.as_str())
+        })
+        .collect();
+
+    let mut true_gaps = Vec::new();
+    let mut existing = Vec::new();
+
+    for gap in gaps {
+        let gap_lower = gap.to_lowercase();
+        // Split gap into words for matching.
+        let gap_words: Vec<&str> = gap_lower.split_whitespace().collect();
+
+        let matched = module_keywords.iter().find(|(keywords, _)| {
+            keywords.iter().any(|kw| {
+                // A keyword matches if any word in the gap contains it as a substring,
+                // or shares a common prefix of at least 3 characters with the keyword.
+                gap_words.iter().any(|gw| gw.contains(kw.as_str()) || keyword_prefix_match(kw, gw))
+            })
+        });
+
+        if let Some((_, module_path)) = matched {
+            existing.push(ExistingInfrastructure {
+                description: gap,
+                module_path: (*module_path).to_string(),
+            });
+        } else {
+            true_gaps.push(gap);
+        }
+    }
+
+    (true_gaps, existing)
+}
+
+/// Returns true if two words share a common prefix of at least 3 characters
+/// and the prefix covers at least half of the shorter word.
+fn keyword_prefix_match(keyword: &str, word: &str) -> bool {
+    let prefix_len = keyword.chars().zip(word.chars()).take_while(|(a, b)| a == b).count();
+    let min_len = keyword.len().min(word.len());
+    prefix_len >= 3 && prefix_len * 2 >= min_len
 }
 
 #[cfg(test)]
@@ -458,5 +551,99 @@ mod tests {
         assert!(prompt.contains("db"));
         assert!(prompt.contains("Add OAuth support"));
         assert!(prompt.contains("routing_table"));
+    }
+
+    #[test]
+    fn filter_gaps_reclassifies_matching_modules() {
+        let modules = vec![
+            crate::map::ModuleSummary {
+                path: "src/db".into(),
+                public_items: vec!["fn query".into(), "fn migrate".into()],
+                dependencies: vec![],
+            },
+            crate::map::ModuleSummary {
+                path: "src/hooks".into(),
+                public_items: vec!["fn execute".into()],
+                dependencies: vec![],
+            },
+        ];
+
+        let gaps = vec![
+            "Database migration system".into(), // "migrate" matches public item
+            "Shell command execution".into(),   // "execute" matches public item
+            "Notification system".into(),       // no match — true gap
+            "Hook management".into(),           // "hook" matches module stem
+        ];
+
+        let (true_gaps, existing) = filter_gaps_against_modules(gaps, &modules);
+
+        assert_eq!(true_gaps, vec!["Notification system"]);
+        assert_eq!(existing.len(), 3);
+
+        // Check that reclassified items include the correct module paths.
+        let paths: Vec<&str> = existing.iter().map(|e| e.module_path.as_str()).collect();
+        assert!(paths.contains(&"src/db"));
+        assert!(paths.contains(&"src/hooks"));
+    }
+
+    #[test]
+    fn filter_gaps_preserves_all_when_no_modules_match() {
+        let modules = vec![crate::map::ModuleSummary {
+            path: "src/auth".into(),
+            public_items: vec!["fn login".into()],
+            dependencies: vec![],
+        }];
+
+        let gaps = vec!["Notification system".into(), "Caching layer".into()];
+
+        let (true_gaps, existing) = filter_gaps_against_modules(gaps, &modules);
+
+        assert_eq!(true_gaps, vec!["Notification system", "Caching layer"]);
+        assert!(existing.is_empty());
+    }
+
+    #[test]
+    fn parse_survey_response_filters_gaps_against_existing_modules() {
+        let map = CodebaseMap {
+            commit_hash: "abc".into(),
+            generated_at: Utc::now(),
+            modules: vec![
+                crate::map::ModuleSummary {
+                    path: "src/db".into(),
+                    public_items: vec!["fn query".into(), "fn migrate".into()],
+                    dependencies: vec![],
+                },
+                crate::map::ModuleSummary {
+                    path: "src/notifications".into(),
+                    public_items: vec!["fn send".into()],
+                    dependencies: vec![],
+                },
+            ],
+            directory_tree: vec![],
+            test_infrastructure: vec![],
+        };
+
+        let response = serde_json::to_string(&json!({
+            "routing_table": {"src/db": "Database", "src/notifications": "Alerts"},
+            "cross_cutting_concerns": [],
+            "foundational_gaps": [
+                "Database migration system",
+                "Notification service",
+                "Monitoring dashboard"
+            ]
+        }))
+        .unwrap();
+
+        let result = parse_survey_response(&response, &map).unwrap();
+
+        // "Monitoring dashboard" is the only true gap.
+        assert_eq!(result.foundational_gaps, vec!["Monitoring dashboard"]);
+
+        // The other two should be reclassified as existing infrastructure.
+        assert_eq!(result.existing_infrastructure.len(), 2);
+        let descs: Vec<&str> =
+            result.existing_infrastructure.iter().map(|e| e.description.as_str()).collect();
+        assert!(descs.contains(&"Database migration system"));
+        assert!(descs.contains(&"Notification service"));
     }
 }

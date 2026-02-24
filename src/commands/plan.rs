@@ -342,6 +342,13 @@ fn print_survey_result(result: &SurveyResult) {
         }
     }
 
+    if !result.existing_infrastructure.is_empty() {
+        println!("\n=== Existing Infrastructure (not gaps) ===");
+        for infra in &result.existing_infrastructure {
+            println!("  - {} (see {})", infra.description, infra.module_path);
+        }
+    }
+
     if !result.dependency_graph.is_empty() {
         println!("\n=== Dependency Graph ===");
         let mut modules: Vec<_> = result.dependency_graph.keys().collect();
@@ -614,6 +621,7 @@ mod tests {
             routing_table,
             cross_cutting_concerns: vec!["error handling".into()],
             foundational_gaps: vec!["notification system".into()],
+            existing_infrastructure: vec![],
             dependency_graph,
         };
 
@@ -630,6 +638,7 @@ mod tests {
             routing_table,
             cross_cutting_concerns: vec!["logging".into()],
             foundational_gaps: vec!["caching".into()],
+            existing_infrastructure: vec![],
             dependency_graph: HashMap::new(),
         };
 
@@ -798,6 +807,7 @@ mod tests {
             routing_table,
             cross_cutting_concerns: vec![],
             foundational_gaps: vec![],
+            existing_infrastructure: vec![],
             dependency_graph: HashMap::new(),
         };
 
@@ -815,6 +825,7 @@ mod tests {
             routing_table: HashMap::new(),
             cross_cutting_concerns: vec![],
             foundational_gaps: vec![],
+            existing_infrastructure: vec![],
             dependency_graph: HashMap::new(),
         };
 
