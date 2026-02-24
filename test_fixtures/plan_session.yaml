@@ -75,9 +75,20 @@ interactions:
       text: '{"routing_table": {"src": "Application entry point and core logic"}, "cross_cutting_concerns": ["error handling"], "foundational_gaps": []}'
       prompt_tokens: 500
       completion_tokens: 100
-# --- Pass 2: Signal classification ---
-# 10. llm.complete — classification
+# --- Pass 1.5: PRD decomposition ---
+# 10. llm.complete — decompose PRD into items
 - seq: 9
+  port: llm
+  method: complete
+  input: {}
+  output:
+    ok:
+      text: '{"items": [{"title": "Add user authentication", "requirement": "Add user authentication", "depends_on": []}]}'
+      prompt_tokens: 200
+      completion_tokens: 50
+# --- Pass 2: Signal classification ---
+# 11. llm.complete — classification
+- seq: 10
   port: llm
   method: complete
   input: {}
@@ -87,8 +98,8 @@ interactions:
       prompt_tokens: 300
       completion_tokens: 80
 # --- Pass 3: Conversation loop ---
-# 11. llm.complete — analysis (all resolved, empty questions)
-- seq: 10
+# 12. llm.complete — analysis (all resolved, empty questions)
+- seq: 11
   port: llm
   method: complete
   input: {}
@@ -98,8 +109,8 @@ interactions:
       prompt_tokens: 200
       completion_tokens: 50
 # --- Pass 2.5: Reconciliation ---
-# 12. llm.complete — reconciliation
-- seq: 11
+# 13. llm.complete — reconciliation
+- seq: 12
   port: llm
   method: complete
   input: {}
@@ -109,21 +120,21 @@ interactions:
       prompt_tokens: 300
       completion_tokens: 50
 # --- Idempotent re-plan: load existing specs ---
-# 13. fs.exists — check tasks directory (empty store, returns false)
-- seq: 12
+# 14. fs.exists — check tasks directory (empty store, returns false)
+- seq: 13
   port: fs
   method: exists
   input: {}
   output: false
 # --- Spec persistence ---
-# 14. id_gen.generate_id — assign spec ID (new spec, no existing match)
-- seq: 13
+# 15. id_gen.generate_id — assign spec ID (new spec, no existing match)
+- seq: 14
   port: id_gen
   method: generate_id
   input: {}
   output: TASK-PLAN-1
-# 15. fs.write — save task spec to store
-- seq: 14
+# 16. fs.write — save task spec to store
+- seq: 15
   port: fs
   method: write
   input: {}

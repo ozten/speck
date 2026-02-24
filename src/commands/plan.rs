@@ -5,7 +5,7 @@ use std::path::Path;
 
 use crate::context::ServiceContext;
 use crate::linkage;
-use crate::plan::conversation::{self, AnalysisResult};
+use crate::plan::conversation::{self, AnalysisResult, DecompositionResult};
 use crate::plan::reconcile::{self, PlanDiff, ReconciliationResult, SpecMatchAction};
 use crate::plan::score::{self, ScoreResult};
 use crate::plan::signal::{
@@ -48,33 +48,56 @@ pub fn run(ctx: &ServiceContext, doc_path: &Path) -> Result<(), String> {
     let (survey, codebase_map) = rt.block_on(broad_survey(ctx, &root, &requirement_text))?;
     print_survey_result(&survey);
 
-    // Pass 2: Signal classification
-    let codebase_context = build_codebase_context(&survey);
-    let classification = rt
-        .block_on(signal::classify(ctx.llm.as_ref(), &requirement_text, &codebase_context))
-        .map_err(|e| format!("signal classification failed: {e}"))?;
+    // Pass 1.5: Decompose PRD into individual requirement items
+    let decomposition = rt
+        .block_on(conversation::decompose_prd(ctx, &requirement_text))
+        .map_err(|e| format!("PRD decomposition failed: {e}"))?;
 
-    let mut specs = match classification {
-        ClassificationResult::Classified { signal_type, strategy } => {
-            let task_spec = build_task_spec(&requirement_text, &signal_type, strategy);
-            print_classification(&task_spec);
-            vec![task_spec]
+    println!("\n=== PRD Decomposition ({} item(s)) ===", decomposition.items.len());
+    for (i, item) in decomposition.items.iter().enumerate() {
+        println!("{}. {}", i + 1, item.title);
+        if !item.depends_on.is_empty() {
+            let dep_labels: Vec<String> =
+                item.depends_on.iter().map(|d| format!("#{}", d + 1)).collect();
+            println!("   Depends on: {}", dep_labels.join(", "));
         }
-        ClassificationResult::PushbackRequired { reason } => {
-            eprintln!("Note: pushback required — {reason}");
-            let task_spec = TaskSpec {
-                id: String::new(),
-                title: requirement_text.clone(),
-                requirement: Some(requirement_text),
-                context: None,
-                acceptance_criteria: vec![],
-                signal_type: SignalType::Fuzzy,
-                verification: VerificationStrategy::DirectAssertion { checks: vec![] },
-                affected_globs: None,
-            };
-            vec![task_spec]
-        }
-    };
+    }
+
+    // Pass 2: Signal classification (per-item)
+    let codebase_context = build_codebase_context(&survey);
+    let mut specs = Vec::with_capacity(decomposition.items.len());
+
+    for (i, prd_item) in decomposition.items.iter().enumerate() {
+        let classification = rt
+            .block_on(signal::classify(ctx.llm.as_ref(), &prd_item.requirement, &codebase_context))
+            .map_err(|e| format!("signal classification failed for item {}: {e}", i + 1))?;
+
+        let task_spec = match classification {
+            ClassificationResult::Classified { signal_type, strategy } => {
+                let mut spec = build_task_spec(&prd_item.requirement, &signal_type, strategy);
+                spec.title.clone_from(&prd_item.title);
+                spec
+            }
+            ClassificationResult::PushbackRequired { reason } => {
+                eprintln!("Note: pushback required for item {} — {reason}", i + 1);
+                TaskSpec {
+                    id: String::new(),
+                    title: prd_item.title.clone(),
+                    requirement: Some(prd_item.requirement.clone()),
+                    context: None,
+                    acceptance_criteria: vec![],
+                    signal_type: SignalType::Fuzzy,
+                    verification: VerificationStrategy::DirectAssertion { checks: vec![] },
+                    affected_globs: None,
+                }
+            }
+        };
+        print_classification(&task_spec);
+        specs.push(task_spec);
+    }
+
+    // Wire up inter-spec dependencies from the decomposition
+    wire_dependencies(&mut specs, &decomposition);
 
     // Pass 2.5: Glob derivation from survey routing table + linkage resolution
     let mut glob_warnings: Vec<String> = Vec::new();
@@ -119,6 +142,9 @@ pub fn run(ctx: &ServiceContext, doc_path: &Path) -> Result<(), String> {
 
     // Match new specs to existing ones (assigns IDs in-place).
     let diff = reconcile::match_to_existing(&mut specs, &existing_specs, ctx.id_gen.as_ref());
+
+    // Resolve positional dependency markers to real spec IDs.
+    resolve_positional_deps(&mut specs);
 
     // Persist final specs to the store.
     for spec in &specs {
@@ -482,6 +508,73 @@ fn print_reconciliation(result: &ReconciliationResult) {
     }
 }
 
+/// Wire inter-spec dependencies based on the PRD decomposition result.
+///
+/// Uses positional indices from `PrdItem::depends_on` to set `context.dependencies`
+/// on each spec. Since specs don't have IDs yet at this point, dependencies are
+/// stored as positional markers (e.g., `"__dep_0"`) that will be resolved to real
+/// IDs after `match_to_existing` assigns them.
+fn wire_dependencies(specs: &mut [TaskSpec], decomposition: &DecompositionResult) {
+    // First pass: collect positional dep markers.
+    let dep_map: Vec<Vec<usize>> =
+        decomposition.items.iter().map(|item| item.depends_on.clone()).collect();
+
+    // Second pass: after all specs exist, resolve to spec IDs (or positional markers).
+    for (i, deps) in dep_map.into_iter().enumerate() {
+        if deps.is_empty() {
+            continue;
+        }
+        let dep_ids: Vec<String> = deps
+            .into_iter()
+            .filter(|&d| d < specs.len())
+            .map(|d| {
+                let dep_id = &specs[d].id;
+                if dep_id.is_empty() {
+                    format!("__dep_{d}")
+                } else {
+                    dep_id.clone()
+                }
+            })
+            .collect();
+
+        if dep_ids.is_empty() {
+            continue;
+        }
+
+        if let Some(ctx) = specs[i].context.as_mut() {
+            ctx.dependencies = dep_ids;
+        } else {
+            specs[i].context = Some(crate::spec::TaskContext {
+                modules: vec![],
+                patterns: None,
+                dependencies: dep_ids,
+            });
+        }
+    }
+}
+
+/// Resolve positional dependency markers (`__dep_N`) to real spec IDs.
+///
+/// Called after `match_to_existing` has assigned IDs to all specs.
+fn resolve_positional_deps(specs: &mut [TaskSpec]) {
+    // Collect all IDs first to avoid borrow conflicts.
+    let ids: Vec<String> = specs.iter().map(|s| s.id.clone()).collect();
+
+    for spec in specs.iter_mut() {
+        if let Some(ctx) = spec.context.as_mut() {
+            for dep in &mut ctx.dependencies {
+                if let Some(idx_str) = dep.strip_prefix("__dep_") {
+                    if let Ok(idx) = idx_str.parse::<usize>() {
+                        if idx < ids.len() {
+                            dep.clone_from(&ids[idx]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Derives directory-level glob patterns from survey routing table keys.
 ///
 /// Each routing table key is a module path (e.g., `"src/services"`) identified
@@ -727,5 +820,80 @@ mod tests {
 
         let globs = derive_globs_from_survey(&survey);
         assert!(globs.is_empty());
+    }
+
+    // --- wire_dependencies tests ---
+
+    fn bare_spec(id: &str, title: &str) -> TaskSpec {
+        TaskSpec {
+            id: id.into(),
+            title: title.into(),
+            requirement: None,
+            context: None,
+            acceptance_criteria: vec![],
+            signal_type: SignalType::Clear,
+            verification: VerificationStrategy::DirectAssertion { checks: vec![] },
+            affected_globs: None,
+        }
+    }
+
+    #[test]
+    fn wire_dependencies_sets_context() {
+        use crate::plan::conversation::{DecompositionResult, PrdItem};
+
+        let mut specs =
+            vec![bare_spec("", "Task A"), bare_spec("", "Task B"), bare_spec("", "Task C")];
+        let decomposition = DecompositionResult {
+            items: vec![
+                PrdItem { title: "Task A".into(), requirement: "Do A".into(), depends_on: vec![] },
+                PrdItem { title: "Task B".into(), requirement: "Do B".into(), depends_on: vec![0] },
+                PrdItem {
+                    title: "Task C".into(),
+                    requirement: "Do C".into(),
+                    depends_on: vec![0, 1],
+                },
+            ],
+        };
+
+        wire_dependencies(&mut specs, &decomposition);
+
+        assert!(specs[0].context.is_none());
+        assert_eq!(specs[1].context.as_ref().unwrap().dependencies, vec!["__dep_0"]);
+        assert_eq!(specs[2].context.as_ref().unwrap().dependencies, vec!["__dep_0", "__dep_1"]);
+    }
+
+    #[test]
+    fn resolve_positional_deps_replaces_markers() {
+        use crate::spec::TaskContext;
+
+        let mut specs = vec![bare_spec("ID-A", "Task A"), bare_spec("ID-B", "Task B")];
+        specs[1].context = Some(TaskContext {
+            modules: vec![],
+            patterns: None,
+            dependencies: vec!["__dep_0".into()],
+        });
+
+        resolve_positional_deps(&mut specs);
+
+        assert_eq!(specs[1].context.as_ref().unwrap().dependencies, vec!["ID-A"]);
+    }
+
+    #[test]
+    fn wire_dependencies_ignores_out_of_bounds() {
+        use crate::plan::conversation::{DecompositionResult, PrdItem};
+
+        let mut specs = vec![bare_spec("", "Task A")];
+        let decomposition = DecompositionResult {
+            items: vec![PrdItem {
+                title: "Task A".into(),
+                requirement: "Do A".into(),
+                depends_on: vec![5], // out of bounds
+            }],
+        };
+
+        wire_dependencies(&mut specs, &decomposition);
+
+        // No context set because the dep was out of bounds
+        assert!(specs[0].context.is_none());
     }
 }

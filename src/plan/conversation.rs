@@ -34,6 +34,94 @@ pub struct AnalysisResult {
     pub questions: Vec<PushbackQuestion>,
 }
 
+/// A single requirement item extracted from a multi-item PRD.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PrdItem {
+    /// Human-readable title for this item.
+    pub title: String,
+    /// The requirement text for this item.
+    pub requirement: String,
+    /// Indices (0-based) of other items this one depends on.
+    #[serde(default)]
+    pub depends_on: Vec<usize>,
+}
+
+/// Result of decomposing a PRD into individual items.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DecompositionResult {
+    /// The individual items extracted from the PRD.
+    pub items: Vec<PrdItem>,
+}
+
+/// Decomposes a PRD document into individual requirement items via LLM.
+///
+/// If the PRD contains multiple distinct features or subsections, each is
+/// extracted as a separate `PrdItem` with its own title and requirement text.
+/// A single-item PRD produces a single-element result.
+///
+/// # Errors
+///
+/// Returns an error if the LLM call fails or the response cannot be parsed.
+pub async fn decompose_prd(
+    ctx: &ServiceContext,
+    requirement_text: &str,
+) -> Result<DecompositionResult, String> {
+    let prompt = build_decomposition_prompt(requirement_text);
+    let request =
+        CompletionRequest { model: "claude-sonnet-4-20250514".into(), prompt, max_tokens: 4096 };
+
+    let response =
+        ctx.llm.complete(&request).await.map_err(|e| format!("LLM decomposition failed: {e}"))?;
+
+    parse_decomposition_response(&response.text)
+}
+
+/// Builds the LLM prompt for PRD decomposition.
+fn build_decomposition_prompt(requirement_text: &str) -> String {
+    format!(
+        r#"Analyze the following PRD/spec document and decompose it into individual work items.
+
+## Document
+
+{requirement_text}
+
+## Instructions
+
+Identify distinct features, changes, or work items described in this document. Each numbered section, feature subsection, or independent change should become a separate item.
+
+Respond with JSON (no markdown fences):
+{{
+  "items": [
+    {{
+      "title": "Short descriptive title for this item",
+      "requirement": "The full requirement text for this specific item",
+      "depends_on": [0]
+    }}
+  ]
+}}
+
+Rules:
+- Each item should be a self-contained work unit with its own requirement text.
+- "depends_on" is an array of 0-based indices of other items this one depends on. Use empty array if no dependencies.
+- If the document describes only a single feature/change, return exactly one item.
+- Preserve the document's own ordering and structure.
+- Do NOT split a single coherent feature into artificial sub-parts. Only split when the document itself delineates separate items.
+- Keep the requirement text detailed enough to implement independently."#
+    )
+}
+
+/// Parses the LLM decomposition response into a `DecompositionResult`.
+fn parse_decomposition_response(response: &str) -> Result<DecompositionResult, String> {
+    let parsed: DecompositionResult = serde_json::from_str(super::extract_json(response))
+        .map_err(|e| format!("failed to parse LLM decomposition response: {e}"))?;
+
+    if parsed.items.is_empty() {
+        return Err("decomposition produced zero items".into());
+    }
+
+    Ok(parsed)
+}
+
 /// Analyzes task specs via LLM in a single pass, returning structured feedback.
 ///
 /// Identifies specs lacking proper verification strategies or with ambiguous
@@ -261,6 +349,79 @@ mod tests {
         assert!(prompt.contains("Clear"));
         assert!(prompt.contains("it works"));
         assert!(prompt.contains("recommended"));
+    }
+
+    // --- parse_decomposition_response tests ---
+
+    #[test]
+    fn parse_decomposition_multiple_items() {
+        let response = serde_json::to_string(&json!({
+            "items": [
+                {
+                    "title": "Add user registration",
+                    "requirement": "Users can sign up with email and password",
+                    "depends_on": []
+                },
+                {
+                    "title": "Add login flow",
+                    "requirement": "Users can log in with their credentials",
+                    "depends_on": [0]
+                },
+                {
+                    "title": "Add profile page",
+                    "requirement": "Users can view and edit their profile",
+                    "depends_on": [0, 1]
+                }
+            ]
+        }))
+        .unwrap();
+
+        let result = parse_decomposition_response(&response).unwrap();
+        assert_eq!(result.items.len(), 3);
+        assert_eq!(result.items[0].title, "Add user registration");
+        assert!(result.items[0].depends_on.is_empty());
+        assert_eq!(result.items[1].title, "Add login flow");
+        assert_eq!(result.items[1].depends_on, vec![0]);
+        assert_eq!(result.items[2].depends_on, vec![0, 1]);
+    }
+
+    #[test]
+    fn parse_decomposition_single_item() {
+        let response = serde_json::to_string(&json!({
+            "items": [{
+                "title": "Add CSV export",
+                "requirement": "Export data as CSV",
+                "depends_on": []
+            }]
+        }))
+        .unwrap();
+
+        let result = parse_decomposition_response(&response).unwrap();
+        assert_eq!(result.items.len(), 1);
+        assert_eq!(result.items[0].title, "Add CSV export");
+    }
+
+    #[test]
+    fn parse_decomposition_rejects_empty_items() {
+        let response = serde_json::to_string(&json!({ "items": [] })).unwrap();
+        let result = parse_decomposition_response(&response);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("zero items"));
+    }
+
+    #[test]
+    fn parse_decomposition_rejects_invalid_json() {
+        let result = parse_decomposition_response("not json");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("failed to parse"));
+    }
+
+    #[test]
+    fn decomposition_prompt_includes_document() {
+        let prompt = build_decomposition_prompt("# My PRD\n\n## Feature 1\nDo stuff.");
+        assert!(prompt.contains("# My PRD"));
+        assert!(prompt.contains("## Feature 1"));
+        assert!(prompt.contains("depends_on"));
     }
 
     // --- analyze_specs integration test ---
