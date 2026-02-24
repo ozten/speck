@@ -26,8 +26,8 @@ analyze_sessions = 1    # Number of recent sessions to include in the analysis p
 backlog_threshold = 10  # Skip analysis if open improvement count exceeds this (0 = disabled)
 
 [quality_gates]
-check = ["cargo check --release"]
-test = ["cargo test --release"]
+check = ["cargo check"]
+test = ["cargo test"]
 lint = ["cargo clippy --fix --allow-dirty"]
 format = ["cargo fmt --check"]
 

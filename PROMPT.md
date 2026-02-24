@@ -11,7 +11,7 @@ Every time you are about to call a tool, ask: "Is there another independent call
 - Session start: `bd ready` + `blacksmith progress show --bead-id <id>` → ONE turn, TWO tool calls
 - Reading source + test: `Read foo.rs` + `Read foo_test.rs` → ONE turn
 - Multiple greps: `Grep("pattern1")` + `Grep("pattern2")` → ONE turn
-- Session end: `Bash(cargo clippy --fix --allow-dirty)` + `Bash(cargo test --release)` → ONE turn (if they don't depend on each other's output)
+- Session end: `Bash(cargo clippy --fix --allow-dirty)` + `Bash(cargo test)` → ONE turn (if they don't depend on each other's output)
 - Reading multiple related files: `Read config.rs` + `Read main.rs` → ONE turn
 
 **General principle:** Before every tool call, ask yourself: "Can I issue another independent tool call right now?" If yes, emit both in the SAME message. When reading or searching multiple files, issue all independent tool calls in a single response — never sequentially.
@@ -112,7 +112,7 @@ For the selected task (e.g., bd-X):
    **4b. Code quality gates:**
    ```bash
    # Run full test suite FIRST, then lint in parallel:
-   cargo test --release
+   cargo test
    # Then in ONE turn with TWO parallel Bash calls:
    cargo clippy --fix --allow-dirty
    cargo fmt --check
@@ -212,7 +212,7 @@ Record improvements as you work — don't batch them to the end of the session.
 
 Before closing a task, run these commands and ensure they pass:
 
-- test: `cargo test --release`
+- test: `cargo test`
 - lint: `cargo clippy --fix --allow-dirty`
 - format: `cargo fmt --check`
 
@@ -221,7 +221,7 @@ Before closing a task, run these commands and ensure they pass:
 - Do NOT launch explore/research subagents (NO `Task` with `subagent_type: Explore`) — the architecture is in MEMORY.md
 - Do NOT re-read files you already know from MEMORY.md
 - Prefer small, atomic changes over large refactors
-- Always run `cargo test --release` before committing
+- Always run `cargo test` before committing
 - Always run `cargo clippy --fix --allow-dirty` then `cargo fmt --check` before committing — exactly ONCE each
 - Always use `blacksmith finish` to close out — do NOT manually run git add/commit/push/bd close/bd sync
 - **NEVER call `bd close` directly** — always go through `blacksmith finish` which enforces quality gates (exception: when `blacksmith finish` has failed 3 times, see "Max 3 attempts" above)
@@ -231,7 +231,7 @@ Before closing a task, run these commands and ensure they pass:
 - Tests that use env::set_var/remove_var race with parallel tests. Refactor commands to accept store_root as parameter via run_with_store() pattern instead of reading env vars.
 
 <!-- Promoted from R3 [reliability] -->
-- When cargo test (or cargo test --release) is listed in a bead's ## Verify section, blacksmith finish runs it twice (once in test gate, once in verify). Avoid duplicating cargo test in the Verify section since the test gate already runs it. Only keep cargo check in Verify.
+- When cargo test is listed in a bead's ## Verify section, blacksmith finish runs it twice (once in test gate, once in verify). Avoid duplicating cargo test in the Verify section since the test gate already runs it. Only keep cargo check in Verify.
 
 <!-- Promoted from R5 [reliability] -->
 - Rapid sequential cargo test runs can conflict when tests create temporary directories (e.g., .speck/cassettes/). Avoid listing cargo test in the Verify section to prevent double-runs against the test gate.
