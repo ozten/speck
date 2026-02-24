@@ -471,7 +471,7 @@ mod tests {
     fn parse_spec_from_body_round_trips_verification() {
         let spec = sample_spec("T-1", "My task");
         let body = issue_body(&spec);
-        let title = format!("[T-1] My task");
+        let title = "[T-1] My task".to_string();
         let parsed = super::parse_spec_from_body("T-1", &title, &body).unwrap();
         assert_eq!(parsed.id, "T-1");
         assert_eq!(parsed.title, "My task");

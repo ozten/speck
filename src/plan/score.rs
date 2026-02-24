@@ -342,6 +342,7 @@ mod tests {
     #[tokio::test]
     async fn score_document_via_cassette() {
         use crate::cassette::format::{Cassette, Interaction};
+        use crate::context::ServiceContext;
         use chrono::Utc;
 
         let dir = std::env::temp_dir().join("speck_score_test");
@@ -384,7 +385,6 @@ mod tests {
         let cassette_path = dir.join("score_test.cassette.yaml");
         std::fs::write(&cassette_path, yaml).unwrap();
 
-        use crate::context::ServiceContext;
         let ctx = ServiceContext::replaying(&cassette_path).unwrap();
 
         let result = score_document(ctx.llm.as_ref(), "Add search with query param").await.unwrap();

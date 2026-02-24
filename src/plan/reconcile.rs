@@ -93,11 +93,11 @@ pub fn match_to_existing(
 
         if let Some((idx, existing_spec)) = found {
             matched_idx.insert(idx);
-            new_spec.id = existing_spec.id.clone();
+            new_spec.id.clone_from(&existing_spec.id);
             actions.push(SpecMatchAction::Updated { id: existing_spec.id.clone() });
         } else {
             let id = id_gen.generate_id();
-            new_spec.id = id.clone();
+            new_spec.id.clone_from(&id);
             actions.push(SpecMatchAction::New { id });
         }
     }

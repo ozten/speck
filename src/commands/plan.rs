@@ -76,17 +76,27 @@ pub fn run(ctx: &ServiceContext, doc_path: &Path) -> Result<(), String> {
         }
     };
 
-    // Pass 2.5: Glob derivation via linkage resolution (reuses map from Pass 1)
+    // Pass 2.5: Glob derivation from survey routing table + linkage resolution
     let mut glob_warnings: Vec<String> = Vec::new();
+    let survey_globs = derive_globs_from_survey(&survey);
     for spec in &mut specs {
+        let mut globs = survey_globs.clone();
+
+        // Also attempt linkage resolution for any context modules on the spec.
         let linkage_result = linkage::resolve(spec, &codebase_map);
-        let (globs, unresolved) = linkage::derive_globs(&linkage_result);
+        let (linkage_globs, unresolved) = linkage::derive_globs(&linkage_result);
         for module_ref in &unresolved {
             glob_warnings.push(format!(
                 "  [spec {}] unresolved module ref '{}': using best-effort glob",
                 spec.id, module_ref
             ));
         }
+        for g in linkage_globs {
+            if !globs.contains(&g) {
+                globs.push(g);
+            }
+        }
+
         spec.affected_globs = Some(globs);
     }
 
@@ -472,6 +482,19 @@ fn print_reconciliation(result: &ReconciliationResult) {
     }
 }
 
+/// Derives directory-level glob patterns from survey routing table keys.
+///
+/// Each routing table key is a module path (e.g., `"src/services"`) identified
+/// by the survey as relevant to the requirement. These are converted to glob
+/// patterns by appending `/**`.
+fn derive_globs_from_survey(survey: &SurveyResult) -> Vec<String> {
+    let mut globs: Vec<String> =
+        survey.routing_table.keys().map(|path| format!("{path}/**")).collect();
+    globs.sort();
+    globs.dedup();
+    globs
+}
+
 /// Print the signal classification and verification strategy.
 fn print_classification(task_spec: &TaskSpec) {
     println!("\n=== Signal Classification ===");
@@ -669,5 +692,40 @@ mod tests {
             },
         );
         print_classification(&spec);
+    }
+
+    #[test]
+    fn derive_globs_from_survey_converts_routing_table_keys() {
+        let mut routing_table = HashMap::new();
+        routing_table.insert("src/services".into(), "Business logic".into());
+        routing_table.insert("src/db".into(), "Database layer".into());
+        routing_table.insert("src/api".into(), "REST endpoints".into());
+
+        let survey = SurveyResult {
+            routing_table,
+            cross_cutting_concerns: vec![],
+            foundational_gaps: vec![],
+            dependency_graph: HashMap::new(),
+        };
+
+        let globs = derive_globs_from_survey(&survey);
+        assert_eq!(globs.len(), 3);
+        // Sorted alphabetically
+        assert_eq!(globs[0], "src/api/**");
+        assert_eq!(globs[1], "src/db/**");
+        assert_eq!(globs[2], "src/services/**");
+    }
+
+    #[test]
+    fn derive_globs_from_survey_empty_routing_table() {
+        let survey = SurveyResult {
+            routing_table: HashMap::new(),
+            cross_cutting_concerns: vec![],
+            foundational_gaps: vec![],
+            dependency_graph: HashMap::new(),
+        };
+
+        let globs = derive_globs_from_survey(&survey);
+        assert!(globs.is_empty());
     }
 }
