@@ -108,15 +108,22 @@ interactions:
       text: '{"merges": [], "extractions": [], "reorders": []}'
       prompt_tokens: 300
       completion_tokens: 50
-# --- Spec persistence ---
-# 13. id_gen.generate_id — assign spec ID
+# --- Idempotent re-plan: load existing specs ---
+# 13. fs.exists — check tasks directory (empty store, returns false)
 - seq: 12
+  port: fs
+  method: exists
+  input: {}
+  output: false
+# --- Spec persistence ---
+# 14. id_gen.generate_id — assign spec ID (new spec, no existing match)
+- seq: 13
   port: id_gen
   method: generate_id
   input: {}
   output: TASK-PLAN-1
-# 14. fs.write — save task spec to store
-- seq: 13
+# 15. fs.write — save task spec to store
+- seq: 14
   port: fs
   method: write
   input: {}

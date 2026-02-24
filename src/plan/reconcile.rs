@@ -46,6 +46,77 @@ pub struct ReorderSuggestion {
     pub reason: String,
 }
 
+/// Action taken for a spec when a new plan is matched against existing on-disk specs.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SpecMatchAction {
+    /// Spec is new — no matching on-disk spec was found.
+    New {
+        /// Freshly generated ID assigned to the new spec.
+        id: String,
+    },
+    /// Spec matched an existing on-disk spec and was updated in place.
+    Updated {
+        /// Existing ID that was preserved.
+        id: String,
+    },
+}
+
+/// Result of matching a new plan against existing on-disk specs.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlanDiff {
+    /// Per-spec actions in the same order as `new_specs` passed to `match_to_existing`.
+    pub actions: Vec<SpecMatchAction>,
+    /// IDs of on-disk specs that were not matched by any new spec (orphaned).
+    pub orphaned: Vec<String>,
+}
+
+/// Match `new_specs` against `existing` on-disk specs by normalized title.
+///
+/// Modifies `new_specs` in-place: matched specs receive the existing spec's ID,
+/// unmatched specs receive a fresh ID from `id_gen`.
+///
+/// Returns a `PlanDiff` describing what changed.
+pub fn match_to_existing(
+    new_specs: &mut [TaskSpec],
+    existing: &[TaskSpec],
+    id_gen: &dyn crate::ports::IdGenerator,
+) -> PlanDiff {
+    let mut matched_idx: HashSet<usize> = HashSet::new();
+    let mut actions = Vec::with_capacity(new_specs.len());
+
+    for new_spec in new_specs.iter_mut() {
+        let norm_new = normalize_title(&new_spec.title);
+        let found = existing
+            .iter()
+            .enumerate()
+            .find(|(i, e)| !matched_idx.contains(i) && normalize_title(&e.title) == norm_new);
+
+        if let Some((idx, existing_spec)) = found {
+            matched_idx.insert(idx);
+            new_spec.id = existing_spec.id.clone();
+            actions.push(SpecMatchAction::Updated { id: existing_spec.id.clone() });
+        } else {
+            let id = id_gen.generate_id();
+            new_spec.id = id.clone();
+            actions.push(SpecMatchAction::New { id });
+        }
+    }
+
+    let orphaned: Vec<String> = existing
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !matched_idx.contains(i))
+        .map(|(_, e)| e.id.clone())
+        .collect();
+
+    PlanDiff { actions, orphaned }
+}
+
+/// Normalize a spec title for matching purposes.
+fn normalize_title(title: &str) -> String {
+    title.to_lowercase()
+}
+
 /// Result of the reconciliation pass.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ReconciliationResult {
@@ -241,10 +312,125 @@ mod tests {
     use super::*;
     use crate::cassette::format::{Cassette, Interaction};
     use crate::context::ServiceContext;
+    use crate::ports::IdGenerator;
     use crate::spec::{SignalType, TaskContext, VerificationCheck, VerificationStrategy};
     use chrono::Utc;
     use serde_json::json;
     use std::path::Path;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    /// Deterministic sequential ID generator for tests.
+    struct SeqIdGen(AtomicU32);
+
+    impl SeqIdGen {
+        fn new() -> Self {
+            SeqIdGen(AtomicU32::new(1))
+        }
+    }
+
+    impl IdGenerator for SeqIdGen {
+        fn generate_id(&self) -> String {
+            format!("NEW-{}", self.0.fetch_add(1, Ordering::Relaxed))
+        }
+    }
+
+    fn bare_spec(id: &str, title: &str) -> TaskSpec {
+        TaskSpec {
+            id: id.into(),
+            title: title.into(),
+            requirement: None,
+            context: None,
+            acceptance_criteria: vec![],
+            signal_type: SignalType::Clear,
+            verification: VerificationStrategy::DirectAssertion { checks: vec![] },
+        }
+    }
+
+    // --- match_to_existing tests ---
+
+    #[test]
+    fn match_exact_title_preserves_id() {
+        let mut new_specs = vec![bare_spec("", "Add CSV export")];
+        let existing = vec![bare_spec("OLD-42", "Add CSV export")];
+        let gen = SeqIdGen::new();
+
+        let diff = match_to_existing(&mut new_specs, &existing, &gen);
+
+        assert_eq!(new_specs[0].id, "OLD-42");
+        assert_eq!(diff.actions, vec![SpecMatchAction::Updated { id: "OLD-42".into() }]);
+        assert!(diff.orphaned.is_empty());
+    }
+
+    #[test]
+    fn unmatched_new_spec_gets_fresh_id() {
+        let mut new_specs = vec![bare_spec("", "Brand new task")];
+        let existing = vec![bare_spec("OLD-42", "Some other task")];
+        let gen = SeqIdGen::new();
+
+        let diff = match_to_existing(&mut new_specs, &existing, &gen);
+
+        assert_eq!(new_specs[0].id, "NEW-1");
+        assert_eq!(diff.actions, vec![SpecMatchAction::New { id: "NEW-1".into() }]);
+        assert_eq!(diff.orphaned, vec!["OLD-42"]);
+    }
+
+    #[test]
+    fn orphaned_reported_when_existing_unmatched() {
+        let mut new_specs = vec![bare_spec("", "Task A")];
+        let existing = vec![bare_spec("OLD-1", "Task A"), bare_spec("OLD-2", "Task B (removed)")];
+        let gen = SeqIdGen::new();
+
+        let diff = match_to_existing(&mut new_specs, &existing, &gen);
+
+        assert_eq!(new_specs[0].id, "OLD-1");
+        assert_eq!(diff.orphaned, vec!["OLD-2"]);
+    }
+
+    #[test]
+    fn empty_existing_all_specs_are_new() {
+        let mut new_specs = vec![bare_spec("", "Task A"), bare_spec("", "Task B")];
+        let gen = SeqIdGen::new();
+
+        let diff = match_to_existing(&mut new_specs, &[], &gen);
+
+        assert_eq!(new_specs[0].id, "NEW-1");
+        assert_eq!(new_specs[1].id, "NEW-2");
+        assert!(diff.orphaned.is_empty());
+        assert_eq!(
+            diff.actions,
+            vec![
+                SpecMatchAction::New { id: "NEW-1".into() },
+                SpecMatchAction::New { id: "NEW-2".into() },
+            ]
+        );
+    }
+
+    #[test]
+    fn match_is_case_insensitive() {
+        let mut new_specs = vec![bare_spec("", "add csv export")];
+        let existing = vec![bare_spec("OLD-7", "Add CSV Export")];
+        let gen = SeqIdGen::new();
+
+        let diff = match_to_existing(&mut new_specs, &existing, &gen);
+
+        assert_eq!(new_specs[0].id, "OLD-7");
+        assert_eq!(diff.actions, vec![SpecMatchAction::Updated { id: "OLD-7".into() }]);
+    }
+
+    #[test]
+    fn each_existing_spec_matched_at_most_once() {
+        // Two new specs with same normalized title — only first should match.
+        let mut new_specs =
+            vec![bare_spec("", "Duplicate Title"), bare_spec("", "Duplicate Title")];
+        let existing = vec![bare_spec("OLD-1", "Duplicate Title")];
+        let gen = SeqIdGen::new();
+
+        let diff = match_to_existing(&mut new_specs, &existing, &gen);
+
+        assert_eq!(new_specs[0].id, "OLD-1");
+        assert_eq!(new_specs[1].id, "NEW-1");
+        assert!(diff.orphaned.is_empty());
+    }
 
     /// Helper to write a cassette file and return its path.
     fn write_cassette(

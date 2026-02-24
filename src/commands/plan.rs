@@ -5,7 +5,7 @@ use std::path::Path;
 
 use crate::context::ServiceContext;
 use crate::plan::conversation::{self, AnalysisResult};
-use crate::plan::reconcile::{self, ReconciliationResult};
+use crate::plan::reconcile::{self, PlanDiff, ReconciliationResult, SpecMatchAction};
 use crate::plan::score::{self, ScoreResult};
 use crate::plan::signal::{
     self, ClassificationResult, PlanCheck, SignalType as PlanSignalType,
@@ -84,22 +84,23 @@ pub fn run(ctx: &ServiceContext, doc_path: &Path) -> Result<(), String> {
         .block_on(reconcile::reconcile(ctx, &specs))
         .map_err(|e| format!("reconciliation failed: {e}"))?;
 
-    // Assign IDs to specs that don't have one yet
-    for spec in &mut specs {
-        if spec.id.is_empty() {
-            spec.id = ctx.id_gen.generate_id();
-        }
-    }
-
-    // Persist final specs to the store
+    // Load existing specs for idempotent re-plan matching.
     let store_root = store_root()?;
     let store = SpecStore::new(ctx, &store_root);
+    let existing_ids = store.list_task_specs().unwrap_or_default();
+    let existing_specs: Vec<_> =
+        existing_ids.iter().filter_map(|id| store.load_task_spec(id).ok()).collect();
+
+    // Match new specs to existing ones (assigns IDs in-place).
+    let diff = reconcile::match_to_existing(&mut specs, &existing_specs, ctx.id_gen.as_ref());
+
+    // Persist final specs to the store.
     for spec in &specs {
         store.save_task_spec(spec)?;
     }
 
     // Print structured output
-    print_structured_output(&specs, &analysis, &reconciliation, &score_result, &store_root);
+    print_structured_output(&specs, &diff, &analysis, &reconciliation, &score_result, &store_root);
 
     Ok(())
 }
@@ -107,6 +108,7 @@ pub fn run(ctx: &ServiceContext, doc_path: &Path) -> Result<(), String> {
 /// Print the full structured output suitable for LLM consumption.
 fn print_structured_output(
     specs: &[TaskSpec],
+    diff: &PlanDiff,
     analysis: &AnalysisResult,
     reconciliation: &ReconciliationResult,
     score_result: &ScoreResult,
@@ -149,9 +151,40 @@ fn print_structured_output(
     // --- Reconciliation ---
     print_reconciliation(reconciliation);
 
+    // --- Plan Diff ---
+    print_plan_diff(diff);
+
     // --- Summary ---
     println!("\n=== Summary ===");
-    println!("{} spec(s) saved to {}", specs.len(), store_root.display());
+    let new_count =
+        diff.actions.iter().filter(|a| matches!(a, SpecMatchAction::New { .. })).count();
+    let updated_count =
+        diff.actions.iter().filter(|a| matches!(a, SpecMatchAction::Updated { .. })).count();
+    println!(
+        "{} spec(s) saved to {} ({} new, {} updated, {} orphaned)",
+        specs.len(),
+        store_root.display(),
+        new_count,
+        updated_count,
+        diff.orphaned.len()
+    );
+}
+
+/// Print the plan diff (new / updated / orphaned) to stdout.
+fn print_plan_diff(diff: &PlanDiff) {
+    println!("\n=== Plan Diff ===");
+    for action in &diff.actions {
+        match action {
+            SpecMatchAction::New { id } => println!("  New task {id}"),
+            SpecMatchAction::Updated { id } => println!("  Updated {id}"),
+        }
+    }
+    for orphan_id in &diff.orphaned {
+        println!("  Orphaned {orphan_id} (no longer in doc)");
+    }
+    if diff.actions.is_empty() && diff.orphaned.is_empty() {
+        println!("  (no changes)");
+    }
 }
 
 /// Print the plan score in structured, LLM-parseable format.
