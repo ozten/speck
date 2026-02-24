@@ -6,6 +6,10 @@ command = "claude"
 args = ["-p", "{prompt}", "--dangerously-skip-permissions", "--verbose", "--output-format", "stream-json"]
 prompt_via = "arg"
 
+# Analysis sessions use a cheaper model: Sonnet vs Opus saves ~68% on output tokens.
+[agent.analysis]
+model = "claude-sonnet-4-6"
+
 [session]
 max_iterations = 100
 

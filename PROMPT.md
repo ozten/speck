@@ -232,3 +232,84 @@ Before closing a task, run these commands and ensure they pass:
 
 <!-- Promoted from R5 [workflow] -->
 - **Documentation-first discovery**: When working with external tool config or unfamiliar CLI tools, FIRST check `--help`, README, and docs directories. Never use `strings`, `strace`, or binary inspection to reverse-engineer formats. The correct discovery order is: (1) `tool --help` / `tool subcommand --help`, (2) README or docs/ in the tool's directory, (3) existing usage examples in the codebase via Grep, (4) only then experiment by running the tool with test inputs.
+
+<!-- Promoted from R1 [workflow] -->
+- When you need to read, search, or check multiple independent files or resources, issue all tool calls in a single response rather than sequentially. Target: parallel tool usage above 15%.
+
+<!-- Promoted from R2 [cost] -->
+- Every turn should include at least one tool call. Do not narrate what you plan to do in a separate turn before doing it — combine explanation with tool calls in the same turn. Target: narration-only below 25%.
+
+<!-- Promoted from R3 [workflow] -->
+- Add [metrics.targets.rules] to .blacksmith/config.toml with baseline thresholds: narration_pct_max=25, parallel_pct_min=15, cost_per_session_max=1.00. Enables automated regression detection.
+
+<!-- Promoted from R4 [workflow] -->
+- Add Rule D to PROMPT.md: if the same edit-check approach fails 5 times in a row, STOP. Record a FAILED-ATTEMPT note and exit. Session 6 burned 63 turns in a config format guessing loop.
+
+<!-- Promoted from R5 [workflow] -->
+- Add rule to PROMPT.md: when working with external tool config, check --help and README first. Never use strings/strace to reverse-engineer binary formats. Session 6 ran strings on blacksmith 8+ times.
+
+<!-- Promoted from R6 [prompt] -->
+- Sessions 8-9 show agents writing 'in parallel' in text but making sequential tool calls. Rule A is understood textually but not translated to behavior. Consider replacing abstract rules with concrete turn-by-turn workflow templates that show exact tool call groupings.
+
+<!-- Promoted from R7 [cost] -->
+- Quality gates in config.toml use cargo check --release and cargo test --release. Release builds add compilation overhead (optimization passes) with no correctness benefit for gate checks. Debug builds are sufficient and faster for small projects. Change config.toml and PROMPT.md to use debug builds.
+
+<!-- Promoted from R8 [cost] -->
+- Add absolute cost threshold to metrics.targets in .blacksmith/config.toml: [[metrics.targets.rules]] with kind=cost.estimate_usd, compare=max, threshold=2.0, direction=below. Current rule only checks data is logged, not actual values. Sessions exceeding $2 should trigger a warning.
+
+<!-- Promoted from R9 [workflow] -->
+- Add PROMPT.md rule: if a bead exceeds 60 turns without reaching verification, stop and mark [TOO-LARGE]. speck-150 burned 215 turns across 2 sessions. Early detection prevents resource waste on oversized beads that need decomposition.
+
+<!-- Promoted from R10 [cost] -->
+- Change analyze_every from 1 to 3 in .blacksmith/config.toml. At $0.78/run, analysis every session is 67% more overhead than needed. Every-3 captures trends while saving ~$0.52/session on average.
+
+<!-- Promoted from R11 [cost] -->
+- Analysis sessions should read well-known files directly (config.toml, PROMPT.md, issues.jsonl) instead of launching Explore subagents. Session 12 spent $0.14 on a Haiku Explore agent finding files at known paths. Add explicit file paths to the analysis prompt template.
+
+<!-- Promoted from R12 [quality] -->
+- blacksmith metrics beads shows 0 closed beads while issues.jsonl shows 20+ closed. The session runner must check bead close status after session exit and record a bead.closed event. Without this, cost-per-bead and completion rate analysis is impossible. Filed as speck-167.
+
+<!-- Promoted from R13 [cost] -->
+- Analysis output tokens are 73% of session cost. Add a conciseness directive to the analysis prompt: 'Be extremely concise. Output data tables, scores, and commands only. Do not explain reasoning at length.' Filed as speck-168.
+
+<!-- Promoted from R14 [cost] -->
+- Analysis sessions do metrics reading and bead filing — no need for Opus reasoning. Add [analysis] model = 'sonnet' config and pass --model flag when spawning analysis agent. Reduces output token cost by 68% ($0.67 to $0.21 per session). Filed as speck-169.
+
+<!-- Promoted from R15 [cost] -->
+- When building the analysis prompt, exclude sessions whose result text contains 'Analysis Complete'. Only feed work sessions into the recent_metrics template variable. This prevents recursive analysis-of-analysis chains that consume 42.8% of total run cost.
+
+<!-- Promoted from R16 [workflow] -->
+- Before spawning an analysis agent, check if open improvement count exceeds 10. If so, skip analysis — the existing backlog should be cleared first. Add improvements.backlog_threshold config option. With 14 open improvements, new analysis runs produce diminishing returns.
+
+<!-- Promoted from R17 [workflow] -->
+- speck-150 consumed 215 turns (2 sessions, 14m28s) for a config-only task. Beads should carry an effort estimate (S/M/L) at creation time. The orchestrator should derive a per-bead turn limit from this estimate (e.g., S=25, M=50, L=100). Distinct from R4 (retry budget) and R9 (global ceiling). Files: .blacksmith/config.toml (effort→turns mapping), PROMPT.md (effort estimate instruction at bead creation).
+
+<!-- Promoted from R18 [workflow] -->
+- When a bead has failed 2+ consecutive sessions (visible via blacksmith metrics beads), decompose it via /break-down-issue instead of retrying. This prevents resource waste on oversized beads — e.g. speck-150 consumed 3 sessions, 257 turns, 32% of all compute with no closure.
+
+<!-- Promoted from R19 [cost] -->
+- Analysis sessions must extract all session metrics in a single comprehensive Python script passed to one Bash call. Do NOT make sequential Bash calls for individual data points. Write one script that reads all session files and outputs a complete metrics summary.
+
+<!-- Promoted from R20 [prompt] -->
+- Analysis sessions must NOT explore the filesystem to find metrics. All required data is injected into the prompt via {{recent_metrics}}. Add explicit directive to ANALYSIS_PROMPT.md forbidding filesystem exploration and Explore subagent use for data already in the prompt.
+
+<!-- Promoted from R21 [workflow] -->
+- When process backlog (open chore-type beads) exceeds 5 items, blacksmith scheduler should prioritize implementing existing process chores over filing new improvements. Prevents improvement accumulation without implementation throughput.
+
+<!-- Promoted from R22 [quality] -->
+- 25 sessions (1322 assistant turns) show 0% parallel despite maximally emphatic PROMPT.md Rule A. speck-148 completed but metric never moved. Future parallel improvement beads should target structural changes (adapter-level call batching) rather than additional prompt engineering.
+
+<!-- Promoted from R23 [workflow] -->
+- Skip analysis sessions when fewer than 3 non-analysis sessions exist in the metrics window. With n<3, no statistically meaningful patterns exist, so the session cost (~$0.30) is pure waste. Check: if session_count < 3, emit 'insufficient data' and exit immediately.
+
+<!-- Promoted from R24 [workflow] -->
+- With 1 session and 23 open improvements, analysis correctly skipped filing. Prioritize clearing R23 (skip guard), R16 (backlog gate), and R21 (throughput gate) to automate this decision.
+
+<!-- Promoted from R25 [workflow] -->
+- With only 1 session and 15 open chore beads, analysis correctly skipped filing. Priority: drain existing P0 chores (speck-165 through speck-176) before next analysis.
+
+<!-- Promoted from R26 [workflow] -->
+- Session 33 spent $0.38/25 turns to conclude no-op. Session 34 (this) reached the same conclusion. All observable patterns covered by R1-R25. Priority: drain P0 chores (speck-176, speck-171, speck-169) before next analysis.
+
+<!-- Promoted from R27 [workflow] -->
+- Skipped analysis — only 1 session available (no patterns possible) and backlog has 26 open items. Matches R23/R24/R25/R26.
