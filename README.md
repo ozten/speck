@@ -41,6 +41,7 @@ For a full end-to-end walkthrough (plan a calculator, file issues with bd, build
 ## Development
 
 ```bash
+git config core.hooksPath .githooks
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features

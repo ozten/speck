@@ -21,7 +21,7 @@ retention = "last-50"
 max = 1
 
 [improvements]
-analyze_every = 3       # Spawn analysis agent every N completed sessions (0 = disabled)
+analyze_every = 5       # Spawn analysis agent every N completed sessions (0 = disabled)
 analyze_sessions = 1    # Number of recent sessions to include in the analysis prompt
 backlog_threshold = 10  # Skip analysis if open improvement count exceeds this (0 = disabled)
 
@@ -65,7 +65,7 @@ label = "Cost tracking health"
 # Cost ceiling: alert when any session exceeds $2.00.
 [[metrics.targets.rules]]
 kind = "cost.estimate_usd"
-compare = "max"
+compare = "avg"
 threshold = 2.0
 direction = "below"
 label = "Cost per session"
