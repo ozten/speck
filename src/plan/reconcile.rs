@@ -343,6 +343,7 @@ mod tests {
             acceptance_criteria: vec![],
             signal_type: SignalType::Clear,
             verification: VerificationStrategy::DirectAssertion { checks: vec![] },
+            affected_globs: None,
         }
     }
 
@@ -468,6 +469,7 @@ mod tests {
                     expected: "all pass".into(),
                 }],
             },
+            affected_globs: None,
         }
     }
 

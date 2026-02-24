@@ -176,6 +176,7 @@ mod tests {
                     expected: "pass".to_string(),
                 }],
             },
+            affected_globs: None,
         };
 
         let yaml = serde_yaml::to_string(&spec).unwrap();

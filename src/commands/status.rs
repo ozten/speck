@@ -118,6 +118,7 @@ mod tests {
                     expected: "pass".to_string(),
                 }],
             },
+            affected_globs: None,
         };
         let spec2 = TaskSpec {
             id: "TASK-2".to_string(),
@@ -129,6 +130,7 @@ mod tests {
             verification: VerificationStrategy::DirectAssertion {
                 checks: vec![VerificationCheck::Custom { description: "manual check".to_string() }],
             },
+            affected_globs: None,
         };
 
         std::fs::write(tasks_dir.join("TASK-1.yaml"), serde_yaml::to_string(&spec1).unwrap())

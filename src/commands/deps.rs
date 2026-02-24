@@ -145,6 +145,7 @@ mod tests {
                     expected: "pass".to_string(),
                 }],
             },
+            affected_globs: None,
         };
 
         std::fs::write(tasks_dir.join("TASK-1.yaml"), serde_yaml::to_string(&spec).unwrap())
@@ -179,6 +180,7 @@ mod tests {
                     expected: "pass".to_string(),
                 }],
             },
+            affected_globs: None,
         };
         let spec2 = TaskSpec {
             id: "TASK-B".to_string(),
@@ -197,6 +199,7 @@ mod tests {
                     expected: "pass".to_string(),
                 }],
             },
+            affected_globs: None,
         };
 
         std::fs::write(tasks_dir.join("TASK-A.yaml"), serde_yaml::to_string(&spec1).unwrap())

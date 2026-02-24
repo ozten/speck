@@ -185,6 +185,7 @@ mod tests {
             acceptance_criteria: vec!["it works".into()],
             signal_type: SignalType::Clear,
             verification,
+            affected_globs: None,
         }
     }
 

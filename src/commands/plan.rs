@@ -69,6 +69,7 @@ pub fn run(ctx: &ServiceContext, doc_path: &Path) -> Result<(), String> {
                 acceptance_criteria: vec![],
                 signal_type: SignalType::Fuzzy,
                 verification: VerificationStrategy::DirectAssertion { checks: vec![] },
+                affected_globs: None,
             };
             vec![task_spec]
         }
@@ -371,6 +372,7 @@ fn build_task_spec(
         acceptance_criteria: vec![],
         signal_type,
         verification,
+        affected_globs: None,
     }
 }
 

@@ -190,6 +190,7 @@ mod tests {
                     expected: "pass".to_string(),
                 }],
             },
+            affected_globs: None,
         }
     }
 

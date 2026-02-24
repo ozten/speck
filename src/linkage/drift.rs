@@ -189,6 +189,7 @@ mod tests {
             verification: VerificationStrategy::DirectAssertion {
                 checks: vec![VerificationCheck::Custom { description: "check".to_string() }],
             },
+            affected_globs: None,
         }
     }
 
@@ -269,6 +270,7 @@ mod tests {
             acceptance_criteria: vec!["done".to_string()],
             signal_type: SignalType::Clear,
             verification: VerificationStrategy::DirectAssertion { checks: vec![] },
+            affected_globs: None,
         };
 
         let report = detect_drift(&[spec], &old_map, &new_map);

@@ -38,4 +38,8 @@ pub struct TaskSpec {
     pub signal_type: SignalType,
     /// How to verify the acceptance criteria.
     pub verification: VerificationStrategy,
+    /// Concrete file glob patterns resolved from abstract module references.
+    /// `None` means globs have not been derived yet (distinct from empty vec which means "affects nothing").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub affected_globs: Option<Vec<String>>,
 }
