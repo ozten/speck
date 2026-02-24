@@ -33,8 +33,25 @@ pub fn run_with_context(
         // Read spec from bd issue tracker.
         let issue =
             ctx.issues.get_issue(bid).map_err(|e| format!("Failed to fetch bead '{bid}': {e}"))?;
-        let spec = beads_sync::parse_spec_from_body(bid, &issue.title, &issue.body)?;
-        results.push(validate::validate(ctx, &spec));
+        if let Some(spec) = beads_sync::parse_spec_from_body(bid, &issue.title, &issue.body)? {
+            results.push(validate::validate(ctx, &spec));
+        } else {
+            if output_json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "spec_id": bid,
+                        "skipped": true,
+                        "reason": "No verification spec found in bead body"
+                    })
+                );
+            } else {
+                eprintln!(
+                    "Warning: bead '{bid}' has no verification YAML block — skipping validation"
+                );
+            }
+            return Ok(());
+        }
     } else {
         if spec_id.is_none() && !all {
             return Err("Provide a SPEC_ID, --bead <bead-id>, or use --all to validate all specs"
@@ -106,6 +123,7 @@ fn store_root() -> Result<PathBuf, String> {
 mod tests {
     use super::*;
     use crate::cassette::config::CassetteConfig;
+    use crate::ports::issues::{Issue, IssueTracker};
     use crate::ports::shell::{ShellExecutor, ShellOutput};
 
     /// Shell executor that returns canned results without running real commands.
@@ -123,6 +141,42 @@ mod tests {
                 stdout: String::new(),
                 stderr: String::new(),
             })
+        }
+    }
+
+    /// Issue tracker that returns a single canned issue.
+    struct FakeIssueTracker {
+        issue: Issue,
+    }
+
+    impl IssueTracker for FakeIssueTracker {
+        fn create_issue(
+            &self,
+            _title: &str,
+            _body: &str,
+        ) -> Result<Issue, Box<dyn std::error::Error + Send + Sync>> {
+            unimplemented!()
+        }
+
+        fn update_issue(
+            &self,
+            _id: &str,
+            _title: Option<&str>,
+            _body: Option<&str>,
+            _status: Option<&str>,
+        ) -> Result<Issue, Box<dyn std::error::Error + Send + Sync>> {
+            unimplemented!()
+        }
+
+        fn list_issues(
+            &self,
+            _status: Option<&str>,
+        ) -> Result<Vec<Issue>, Box<dyn std::error::Error + Send + Sync>> {
+            unimplemented!()
+        }
+
+        fn get_issue(&self, _id: &str) -> Result<Issue, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(self.issue.clone())
         }
     }
 
@@ -231,5 +285,35 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("failed"));
+    }
+
+    #[test]
+    fn cli_validate_bead_without_verification_yaml_succeeds() {
+        let mut ctx = test_context();
+        ctx.issues = Box::new(FakeIssueTracker {
+            issue: Issue {
+                id: "BD-99".to_string(),
+                title: "A manually created bead".to_string(),
+                body: "Just some plain text without any yaml block".to_string(),
+                status: "open".to_string(),
+            },
+        });
+        let result = run_with_context(&ctx, None, false, Some("BD-99"), false, None);
+        assert!(result.is_ok(), "expected Ok but got: {result:?}");
+    }
+
+    #[test]
+    fn cli_validate_bead_without_verification_yaml_json_succeeds() {
+        let mut ctx = test_context();
+        ctx.issues = Box::new(FakeIssueTracker {
+            issue: Issue {
+                id: "BD-100".to_string(),
+                title: "Another manual bead".to_string(),
+                body: "No yaml here either".to_string(),
+                status: "open".to_string(),
+            },
+        });
+        let result = run_with_context(&ctx, None, false, Some("BD-100"), true, None);
+        assert!(result.is_ok(), "expected Ok but got: {result:?}");
     }
 }

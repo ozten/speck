@@ -104,10 +104,17 @@ fn issue_body(spec: &TaskSpec) -> String {
 /// (as produced by [`issue_body`]).  The `bead_id` becomes the spec ID, and the
 /// `[SPEC-ID]` prefix is stripped from `title` if present.
 ///
+/// Returns `Ok(None)` if the body contains no YAML verification block (e.g.
+/// manually-created beads).
+///
 /// # Errors
 ///
-/// Returns an error if the body contains no parseable YAML verification block.
-pub fn parse_spec_from_body(bead_id: &str, title: &str, body: &str) -> Result<TaskSpec, String> {
+/// Returns `Err` when a YAML block is present but cannot be parsed.
+pub fn parse_spec_from_body(
+    bead_id: &str,
+    title: &str,
+    body: &str,
+) -> Result<Option<TaskSpec>, String> {
     // Strip "[BEAD-ID] " prefix from title if present.
     let prefix = format!("[{bead_id}] ");
     let clean_title = if title.starts_with(&prefix) {
@@ -117,9 +124,13 @@ pub fn parse_spec_from_body(bead_id: &str, title: &str, body: &str) -> Result<Ta
     };
 
     let acceptance_criteria = extract_acceptance_criteria(body);
-    let verification = extract_verification(body)?;
+    let verification = match extract_verification(body) {
+        Ok(v) => v,
+        Err(_) if !body.contains("```yaml") => return Ok(None),
+        Err(e) => return Err(e),
+    };
 
-    Ok(TaskSpec {
+    Ok(Some(TaskSpec {
         id: bead_id.to_string(),
         title: clean_title,
         requirement: None,
@@ -128,7 +139,7 @@ pub fn parse_spec_from_body(bead_id: &str, title: &str, body: &str) -> Result<Ta
         signal_type: SignalType::Clear,
         verification,
         affected_globs: None,
-    })
+    }))
 }
 
 /// Extracts acceptance criteria bullet points from the `## Acceptance Criteria` section.
@@ -472,7 +483,7 @@ mod tests {
         let spec = sample_spec("T-1", "My task");
         let body = issue_body(&spec);
         let title = "[T-1] My task".to_string();
-        let parsed = super::parse_spec_from_body("T-1", &title, &body).unwrap();
+        let parsed = super::parse_spec_from_body("T-1", &title, &body).unwrap().unwrap();
         assert_eq!(parsed.id, "T-1");
         assert_eq!(parsed.title, "My task");
         assert_eq!(parsed.verification, spec.verification);
@@ -483,7 +494,8 @@ mod tests {
         let mut spec = sample_spec("T-2", "Criteria task");
         spec.acceptance_criteria = vec!["criterion A".to_string(), "criterion B".to_string()];
         let body = issue_body(&spec);
-        let parsed = super::parse_spec_from_body("T-2", "[T-2] Criteria task", &body).unwrap();
+        let parsed =
+            super::parse_spec_from_body("T-2", "[T-2] Criteria task", &body).unwrap().unwrap();
         assert_eq!(parsed.acceptance_criteria, vec!["criterion A", "criterion B"]);
     }
 
@@ -491,7 +503,8 @@ mod tests {
     fn parse_spec_from_body_strips_title_prefix() {
         let spec = sample_spec("T-3", "Strip prefix");
         let body = issue_body(&spec);
-        let parsed = super::parse_spec_from_body("T-3", "[T-3] Strip prefix", &body).unwrap();
+        let parsed =
+            super::parse_spec_from_body("T-3", "[T-3] Strip prefix", &body).unwrap().unwrap();
         assert_eq!(parsed.title, "Strip prefix");
     }
 
@@ -499,15 +512,22 @@ mod tests {
     fn parse_spec_from_body_handles_title_without_prefix() {
         let spec = sample_spec("T-4", "No prefix");
         let body = issue_body(&spec);
-        let parsed = super::parse_spec_from_body("T-4", "No prefix", &body).unwrap();
+        let parsed = super::parse_spec_from_body("T-4", "No prefix", &body).unwrap().unwrap();
         assert_eq!(parsed.title, "No prefix");
     }
 
     #[test]
-    fn parse_spec_from_body_errors_on_missing_yaml_block() {
+    fn parse_spec_from_body_returns_none_on_missing_yaml_block() {
         let result = super::parse_spec_from_body("T-5", "Title", "no yaml here");
+        assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn parse_spec_from_body_errors_on_malformed_yaml_block() {
+        let body = "## Verification\n```yaml\nnot: [valid: yaml: {{{\n```\n";
+        let result = super::parse_spec_from_body("T-6", "Title", body);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("yaml block"));
+        assert!(result.unwrap_err().contains("Failed to parse"));
     }
 
     #[test]
