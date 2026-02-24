@@ -58,25 +58,28 @@ If you try the same approach (edit a file, run a command, check the result) and 
 The project architecture is documented in MEMORY.md — do NOT re-explore the codebase.
 Only read files you are about to modify. Do NOT launch explore subagents (this means NO `Task` tool with `subagent_type: Explore`).
 
-1. Run `bd ready` AND `blacksmith progress show --bead-id <id>` in the SAME turn (Rule A — two parallel tool calls)
+1. Run `bd ready` AND `blacksmith metrics beads` in the SAME turn (Rule A — two parallel tool calls)
 
 ## Task Selection
 Pick ONE task from the ready queue. **Always pick the highest-priority (lowest number) ready task.** Only deviate if recent `blacksmith progress list --bead-id <id>` entries explain why a specific lower-priority task should go next (e.g., it's a quick follow-up to the last session's work).
 
 **Remember Rule C**: You will work on exactly ONE task this session. After closing it, exit immediately.
 
-### Failed-Attempt Detection
-Before claiming a task, run `bd show <id>` and check its notes for `[FAILED-ATTEMPT]` markers.
+### Stuck-Bead Detection (check BEFORE claiming)
+After picking a candidate bead, check two signals in ONE parallel turn:
+- `bd show <id>` — look for `[FAILED-ATTEMPT]` markers in the notes
+- `blacksmith metrics beads` — look for the bead's SESSIONS count (already fetched above)
 
-- **0 prior failures**: Proceed normally.
-- **1 prior failure**: Proceed, but read the failure reason carefully. If the reason mentions "too large" or "ran out of turns," consider whether you can realistically finish in 55 turns. If not, skip to the decomposition step below.
-- **2+ prior failures**: Do NOT attempt implementation. Instead, decompose the bead into smaller sub-beads:
-  1. Analyze the bead description and failure notes to understand why it keeps failing
-  2. Break it into 2-5 smaller sub-beads (follow the break-down-issue workflow: create children, wire deps, make original blocked-by children)
+**Decision matrix:**
+- **0 prior failures AND sessions < 2**: Proceed normally.
+- **1 prior failure OR sessions == 1**: Proceed, but read the failure reason carefully. If the reason mentions "too large" or "ran out of turns," consider whether you can realistically finish in 55 turns. If not, skip to the decomposition step below.
+- **2+ prior failures OR sessions >= 2**: The bead is **stuck**. Do NOT attempt implementation. Instead, invoke `/break-down-issue` to decompose it:
+  1. Use the `break-down-issue` skill: invoke it with the bead ID
+  2. The skill will create child beads, wire dependencies, and block the parent on children
   3. Record decomposition with `blacksmith progress add --bead-id <id> --stdin`, then exit cleanly via `blacksmith finish`
   4. The next session will pick up the newly-unblocked child beads
 
-If ALL top-priority ready beads have 2+ failures and you've decomposed them, move to the next priority level.
+If ALL top-priority ready beads are stuck and you've decomposed them, move to the next priority level.
 
 ### No Work Available
 If `bd ready` returns no tasks, exit immediately:
