@@ -1,42 +1,58 @@
 # speck
 
+> **Status: Not Ready for Use**
+> This project is still being actively designed and iterated on. APIs, commands, and behavior may change significantly. Do not depend on it for production workflows.
+
 Speck sandwiches requirements gathering and verification around the meat of product development.
 
-`speck` is a Rust CLI for spec-driven development workflows:
+`speck` is a Rust CLI for **spec-driven development**: transform requirements into verifiable task specs, then prove they're done with automated checks.
 
-- `speck plan`: requirements, risks, and milestone planning.
-- `speck validate`: test/lint/acceptance verification against specs.
-- `speck map`: generate a codebase dependency map.
-- `speck show`: inspect spec details.
-- `speck status`: display project spec status.
-- `speck deps`: list dependency relationships between specs.
-- `speck sync`: sync specs to an external tracker (e.g., beads).
-
-## Configuration
+## Quick Start
 
 ```bash
-cp env.example.txt .env
+# Build
+cargo build
+
+# Configure API key (required for speck plan)
+cp env.example.txt .env   # then edit with your Anthropic API key
+
+# Plan → Inspect → Validate
+speck plan "your requirement here"
+speck status
+speck show
+speck validate --all
 ```
 
-Edit `.env` and set your Anthropic API key:
+See the [Getting Started](docs/getting-started.md) guide for full setup instructions.
 
-```
-ANTHROPIC_API_KEY=sk-ant-...
-```
+## Commands
 
-The `.env` file is gitignored. You can also export the variable directly in your shell.
+| Command | Description |
+|---|---|
+| `speck plan` | Generate task specs from requirements via multi-pass LLM analysis |
+| `speck validate` | Run verification checks against specs |
+| `speck map` | Generate codebase structure maps and detect drift |
+| `speck status` | List all specs with signal type and strategy |
+| `speck show` | Inspect spec details |
+| `speck deps` | Visualize dependency graph between specs |
+| `speck sync` | Push specs to external issue trackers (beads/bd) |
 
-## Quick start
+## Documentation
 
-```bash
-cargo run -- plan "your requirement here"
-cargo run -- status
-cargo run -- show
-cargo run -- validate --all
-cargo run -- map
-```
-
-For a full end-to-end walkthrough (plan a calculator, file issues with bd, build, validate), see [docs/walkthrough.md](docs/walkthrough.md).
+| Document | Description |
+|---|---|
+| [Overview](docs/overview.md) | What Speck is, philosophy, and how features connect |
+| [Getting Started](docs/getting-started.md) | Installation, configuration, and first run |
+| [CLI Reference](docs/cli-reference.md) | Full command documentation with all options |
+| [Planning](docs/planning.md) | Multi-pass planning pipeline deep dive |
+| [Validation](docs/validation.md) | Verification checks, strategies, and the feedback loop |
+| [Spec Format](docs/spec-format.md) | TaskSpec YAML structure reference |
+| [Codebase Mapping](docs/codebase-mapping.md) | Map generation, caching, and drift detection |
+| [Sync](docs/sync.md) | External tracker integration (beads/bd) |
+| [Architecture](docs/architecture.md) | Port/adapter design, project layout, request flow |
+| [Record/Replay](docs/record-replay.md) | Cassette system for deterministic testing |
+| [Development](docs/development.md) | Building, testing, and contributing |
+| [Walkthrough](docs/walkthrough.md) | End-to-end tutorial: plan a calculator, file issues, validate |
 
 ## Development
 
@@ -47,21 +63,4 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
 ```
 
-## Project layout
-
-- `src/cli.rs`: argument parsing and subcommands.
-- `src/commands/`: command handlers (`plan`, `validate`, `map`, `show`, `status`, `deps`, `sync`).
-- `src/ports/`: trait-based port interfaces (clock, filesystem, git, llm, shell, issues, id_gen).
-- `src/adapters/`: live, recording, and replaying adapter implementations.
-- `src/cassette/`: record/replay infrastructure for deterministic testing.
-- `src/context.rs`: `ServiceContext` wiring for live, recording, and replaying modes.
-- `src/spec/`: spec model, checks, signals, and verification logic.
-- `src/store/`: spec persistence (YAML-based).
-- `src/plan/`: planning subsystem (conversation, survey, reconcile, feedback, signals).
-- `src/map/`: codebase map generation and diffing.
-- `src/linkage/`: spec-to-code linkage resolution and drift detection.
-- `src/sync/`: external tracker sync (beads integration).
-- `src/validate/`: validation orchestration.
-- `tests/cli.rs`: integration tests for CLI behavior.
-- `tests/record_replay.rs`: record/replay round-trip tests.
-- `.github/workflows/ci.yml`: CI checks for fmt, lint, and tests.
+See [Development](docs/development.md) for full details.
